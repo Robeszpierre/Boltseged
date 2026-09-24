@@ -116,18 +116,6 @@ const blankA = (): A => ({
     while ([0, 6].includes(d.getDay())) d.setDate(d.getDate() + 1);
     return date(d);
   };
-const DEV_SENDER: A = {
-  companyName: "Robest's Gift Kft",
-  contactName: "Robest's Gift Kft",
-  countryCode: "HU",
-  postalCode: "1051",
-  cityName: "Budapest",
-  addressLine1: "Nyári Pál utca 15",
-  addressLine2: "",
-  stateOrProvinceCode: "",
-  phone: "+36204039609",
-  email: "aaa@aaa.com",
-};
 const DEV_RECIPIENT: A = {
   companyName: "Test Receiver",
   contactName: "Test Receiver",
@@ -169,7 +157,7 @@ function shouldBeCustomsDeclarable(
 const min = next(),
   pickupDate = ref(min),
   invoiceDate = ref(min),
-  sender = ref(isDevelopment ? { ...DEV_SENDER } : blankA()),
+  sender = ref(blankA()),
   recipient = ref(isDevelopment ? { ...DEV_RECIPIENT } : blankA()),
   packages = ref<P[]>([isDevelopment ? { ...DEV_PACKAGE } : blankP()]),
   customsOverride = ref<boolean | null>(null),
@@ -198,6 +186,17 @@ const effectiveCustomsDeclarable = computed(
       sender.value.countryCode,
       recipient.value.countryCode,
     ),
+);
+const senderProfileComplete = computed(
+  () =>
+    Boolean(sender.value.companyName) &&
+    Boolean(sender.value.contactName) &&
+    validCountry(sender.value.countryCode) &&
+    Boolean(sender.value.postalCode) &&
+    Boolean(sender.value.cityName) &&
+    Boolean(sender.value.addressLine1) &&
+    Boolean(sender.value.phone) &&
+    /^\S+@\S+\.\S+$/.test(sender.value.email),
 );
 watch(
   [() => sender.value.countryCode, () => recipient.value.countryCode],
@@ -240,10 +239,11 @@ const country = (v: string) => v.trim().toUpperCase();
 const validCountry = (v: string) => ISO2.has(country(v));
 function valid() {
   let m = "";
-  for (const [name, a] of [
-    ["Feladó", sender.value],
-    ["Címzett", recipient.value],
-  ] as const) {
+  if (!senderProfileComplete.value) {
+    m = "A küldemény létrehozásához előbb töltsd ki a Feladói adatok menüpontban a szükséges céges adatokat.";
+  }
+  for (const [name, a] of [["Címzett", recipient.value]] as const) {
+    if (m) break;
     if (
       !a.companyName ||
       !a.contactName ||
@@ -406,11 +406,17 @@ async function create() {
     creating.value = false;
   }
 }
-async function useProfile() {
+function useProfile() {
   sender.value = {
-    ...sender.value,
     companyName: profile.value.companyName || "",
     contactName: profile.value.contactName || "",
+    countryCode: profile.value.senderCountryCode || "",
+    postalCode: profile.value.senderPostalCode || "",
+    cityName: profile.value.senderCityName || "",
+    addressLine1: profile.value.senderAddressLine1 || "",
+    addressLine2: profile.value.senderAddressLine2 || "",
+    stateOrProvinceCode: profile.value.senderStateOrProvinceCode || "",
+    phone: profile.value.senderPhone || "",
     email: profile.value.email || "",
   };
 }
@@ -440,6 +446,7 @@ async function copy(x: string) {
 onMounted(async () => {
   try {
     profile.value = await api("/api/account/profile");
+    useProfile();
   } finally {
     loadingProfile.value = false;
   }
@@ -488,34 +495,31 @@ onMounted(async () => {
     <section class="card">
       <div class="section-head">
         <h2>1. Feladó</h2>
-        <button
-          class="secondary"
-          :disabled="loadingProfile"
-          @click="useProfile"
-        >
-          Cégadatok használata
-        </button>
+        <RouterLink class="button secondary" to="/company-profile">Feladói adatok szerkesztése</RouterLink>
       </div>
+      <p class="muted">A feladó automatikusan a mentett Feladói adatokból töltődik be.</p>
+      <p v-if="!loadingProfile && !senderProfileComplete" class="alert error">
+        A küldemény létrehozásához előbb töltsd ki a Feladói adatok menüpontban a szükséges céges adatokat.
+      </p>
       <div class="address-grid">
-        <label>Cégnév *<input v-model.trim="sender.companyName" /></label
+        <label>Cégnév *<input :value="sender.companyName" readonly /></label
         ><label
-          >Kapcsolattartó neve *<input v-model.trim="sender.contactName" /></label
+          >Kapcsolattartó neve *<input :value="sender.contactName" readonly /></label
         ><label
           >Országkód *<input
-            v-model="sender.countryCode"
-            maxlength="2"
-            @input="sender.countryCode = country(sender.countryCode)"
+            :value="sender.countryCode"
+            readonly
           /><small>2 betűs ISO országkód, pl. HU, DE, US</small></label
         ><label
           >Állam / tartomány<input
-            v-model.trim="sender.stateOrProvinceCode"
-            placeholder="pl. NC" /></label
-        ><label>Irányítószám *<input v-model.trim="sender.postalCode" /></label
-        ><label>Város *<input v-model.trim="sender.cityName" /></label
-        ><label>Cím *<input v-model.trim="sender.addressLine1" /></label
-        ><label>Cím 2<input v-model.trim="sender.addressLine2" /></label
-        ><label>Telefonszám *<input v-model.trim="sender.phone" /></label
-        ><label>E-mail<input v-model.trim="sender.email" /></label>
+            :value="sender.stateOrProvinceCode"
+            readonly /></label
+        ><label>Irányítószám *<input :value="sender.postalCode" readonly /></label
+        ><label>Város *<input :value="sender.cityName" readonly /></label
+        ><label>Cím *<input :value="sender.addressLine1" readonly /></label
+        ><label>Cím 2<input :value="sender.addressLine2" readonly /></label
+        ><label>Telefonszám *<input :value="sender.phone" readonly /></label
+        ><label>E-mail *<input :value="sender.email" readonly /></label>
       </div>
     </section>
     <section class="card">
@@ -683,7 +687,7 @@ onMounted(async () => {
       <p v-if="stale" class="alert error">
         A küldemény adatai megváltoztak. Kérj új szállítási díjakat.
       </p>
-      <button :disabled="quoteLoading" @click="quote">
+      <button :disabled="quoteLoading || loadingProfile || !senderProfileComplete" @click="quote">
         {{
           quoteLoading ? "Díjak lekérése…" : "Szállítási díjak lekérése"
         }}</button
@@ -720,7 +724,7 @@ onMounted(async () => {
           {{ money(selected.estimatedCost, selected.currency) }}</b
         >
       </p>
-      <button :disabled="creating" @click="create">
+      <button :disabled="creating || !senderProfileComplete" @click="create">
         {{ creating ? "Küldemény létrehozása…" : "Küldemény létrehozása" }}
       </button>
     </section>

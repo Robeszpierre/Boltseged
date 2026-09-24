@@ -1,0 +1,18 @@
+ALTER TABLE accounts
+    ADD COLUMN sender_country_code VARCHAR(2),
+    ADD COLUMN sender_postal_code VARCHAR(32),
+    ADD COLUMN sender_city_name VARCHAR(120),
+    ADD COLUMN sender_address_line1 VARCHAR(255),
+    ADD COLUMN sender_address_line2 VARCHAR(255),
+    ADD COLUMN sender_state_or_province_code VARCHAR(64),
+    ADD COLUMN sender_phone VARCHAR(64),
+    ADD COLUMN pickup_company_name VARCHAR(255),
+    ADD COLUMN pickup_contact_name VARCHAR(255),
+    ADD COLUMN pickup_country_code VARCHAR(2),
+    ADD COLUMN pickup_postal_code VARCHAR(32),
+    ADD COLUMN pickup_city_name VARCHAR(120),
+    ADD COLUMN pickup_address_line1 VARCHAR(255),
+    ADD COLUMN pickup_address_line2 VARCHAR(255),
+    ADD COLUMN pickup_state_or_province_code VARCHAR(64),
+    ADD COLUMN pickup_phone VARCHAR(64),
+    ADD COLUMN pickup_email VARCHAR(255);

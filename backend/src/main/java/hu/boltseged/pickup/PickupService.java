@@ -16,6 +16,7 @@ import java.util.*;
   private final PickupBookingRepository bookings; private final ShipmentRepository shipments; private final ShippingProvider dhl; private final ObjectMapper json;
   public PickupService(PickupBookingRepository b,ShipmentRepository s,ShippingProvider d,ObjectMapper j){bookings=b;shipments=s;dhl=d;json=j;}
   @Transactional public PickupBooking create(Account account,PickupController.CreateRequest request){
+    ShippingProvider.Address pickup=pickupAddress(account);
     List<UUID> unique=request.shipmentIds().stream().distinct().toList();
     List<Shipment> selected=shipments.findAllForPickupByIdIn(unique);
     if(selected.size()!=unique.size()||selected.stream().anyMatch(s->!s.getAccount().getId().equals(account.getId())||!"CREATED".equals(s.getStatus())))throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Egy vagy több küldemény nem található.");
@@ -23,11 +24,10 @@ import java.util.*;
     if(booked!=null)throw new ResponseStatusException(HttpStatus.CONFLICT,"Ehhez a küldeményhez már tartozik aktív futárrendelés: "+booked.getMasterTrackingNumber());
     int packageCount=selected.stream().mapToInt(s->s.getPackages().size()).sum();
     BigDecimal totalWeight=selected.stream().flatMap(s->s.getPackages().stream()).map(ShipmentPackage::getWeight).reduce(BigDecimal.ZERO,BigDecimal::add);
-    ShippingProvider.Address pickup=address(request.address());
     ShippingProvider.Address shipper=address(readAddress(selected.getFirst().getSender()));
     List<ShippingProvider.PickupShipment> details=selected.stream().map(this::pickupShipment).toList();
     ShippingProvider.PickupResult result=dhl.createPickup(new ShippingProvider.PickupRequest(request.pickupDate().atTime(request.readyTime()),shipper,pickup,details,request.closeTime(),request.location(),request.locationType(),request.specialInstructions()));
-    PickupBooking booking=new PickupBooking(account,write(result.dispatchConfirmationNumbers()),write(result.warnings()),request.pickupDate(),request.readyTime(),request.closeTime(),write(request.address()),packageCount,totalWeight,selected);
+    PickupBooking booking=new PickupBooking(account,write(result.dispatchConfirmationNumbers()),write(result.warnings()),request.pickupDate(),request.readyTime(),request.closeTime(),write(pickup),packageCount,totalWeight,selected);
     return bookings.save(booking);
   }
   public List<PickupBooking> list(Account account){return bookings.findByAccountIdOrderByCreatedAtDesc(account.getId());}
@@ -37,7 +37,8 @@ import java.util.*;
   private record CustomsSnapshot(boolean declarable,BigDecimal declaredValue,String declaredValueCurrency){}
   private Map<String,Object> readAddress(String value){try{return json.readValue(value,new TypeReference<>(){});}catch(Exception e){throw new IllegalStateException("Invalid shipment address snapshot",e);}}
   private List<String> readStrings(String value){try{return json.readValue(value,new TypeReference<>(){});}catch(Exception e){throw new IllegalStateException(e);}}
-  private ShippingProvider.Address address(PickupController.AddressRequest a){return new ShippingProvider.Address(a.companyName(),a.contactName(),a.countryCode(),a.postalCode(),a.cityName(),a.addressLine1(),a.addressLine2(),a.stateOrProvinceCode(),a.phone(),a.email());}
+  private ShippingProvider.Address pickupAddress(Account account){if(blank(account.getPickupCompanyName())||blank(account.getPickupContactName())||account.getPickupCountryCode()==null||!account.getPickupCountryCode().matches("[A-Z]{2}")||blank(account.getPickupPostalCode())||blank(account.getPickupCityName())||blank(account.getPickupAddressLine1())||blank(account.getPickupPhone()))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"A futár rendeléséhez előbb töltsd ki a Feladói adatok menüpontban a felvételi címet.");return new ShippingProvider.Address(account.getPickupCompanyName(),account.getPickupContactName(),account.getPickupCountryCode(),account.getPickupPostalCode(),account.getPickupCityName(),account.getPickupAddressLine1(),account.getPickupAddressLine2(),account.getPickupStateOrProvinceCode(),account.getPickupPhone(),account.getPickupEmail());}
+  private boolean blank(String value){return value==null||value.isBlank();}
   private ShippingProvider.Address address(Map<String,Object> a){return new ShippingProvider.Address(text(a,"companyName"),text(a,"contactName"),text(a,"countryCode"),text(a,"postalCode"),text(a,"cityName"),text(a,"addressLine1"),text(a,"addressLine2"),text(a,"stateOrProvinceCode"),text(a,"phone"),text(a,"email"));}
   private String text(Map<String,Object> a,String key){Object value=a.get(key);return value==null?null:String.valueOf(value);}
   private String write(Object value){try{return json.writeValueAsString(value);}catch(Exception e){throw new IllegalArgumentException("Invalid pickup data",e);}}
