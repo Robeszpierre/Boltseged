@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - boltseged-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - boltseged-internal
+
+  backend:
+    build: ./backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION_MINUTES: ${JWT_EXPIRATION_MINUTES}
+      APP_ADMIN_EMAIL: ${ADMIN_EMAIL}
+      APP_ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      DHL_API_BASE_URL: ${DHL_API_BASE_URL}
+      DHL_API_USERNAME: ${DHL_API_USERNAME}
+      DHL_API_PASSWORD: ${DHL_API_PASSWORD}
+      DHL_ACCOUNT_NUMBER: ${DHL_ACCOUNT_NUMBER}
+      DHL_TEST_MODE: ${DHL_TEST_MODE}
+      LABEL_STORAGE_PATH: ${LABEL_STORAGE_PATH}
+    volumes:
+      - boltseged-label-data:/app/data/labels
+    restart: unless-stopped
+    networks:
+      boltseged-internal:
+      public-proxy:
+        aliases:
+          - boltseged-backend
+
+  frontend:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.frontend
+    restart: unless-stopped
+    networks:
+      public-proxy:
+        aliases:
+          - boltseged-frontend
+
+volumes:
+  boltseged-postgres-data:
+  boltseged-label-data:
+
+networks:
+  boltseged-internal:
+    internal: true
+  public-proxy:
+    external: true
+    name: public-proxy

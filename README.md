@@ -22,6 +22,27 @@ Flyway runs automatically at backend startup. The first administrator is provisi
 
 `docker compose up --build` starts PostgreSQL, backend, production-built frontend and Caddy. Copy `.env.example` to `.env` first for real configuration. Caddy serves `boltseged.hu` and proxies `api.boltseged.hu` to the backend; DNS for both domains must point at the host and ports 80/443 must be reachable.
 
+## VPS production deployment
+
+The production deployment is intentionally separate from the development `docker-compose.yml`. Boltseged does **not** publish or own host ports 80/443; the existing VPS Caddy container remains the only public listener.
+
+1. Create the shared external proxy network once:
+
+   ```sh
+   docker network create public-proxy
+   ```
+
+2. Clone this repository to `/opt/boltseged`.
+3. Copy `.env.prod.example` to `.env.prod` and set the production database credentials, JWT secret, administrator credentials, and DHL credentials.
+4. Start Boltseged:
+
+   ```sh
+   cd /opt/boltseged
+   docker compose -f compose.prod.yaml --env-file .env.prod up -d --build
+   ```
+
+Attach the existing Caddy container to `public-proxy`, then route `boltseged.hu` to `boltseged-frontend` and `/api/*` to `boltseged-backend:8080`. This keeps frontend and API requests same-origin at `https://boltseged.hu/` and `https://boltseged.hu/api/`.
+
 ## Tests
 
 `cd backend; ./mvnw test` (Windows: `mvnw.cmd test`)
