@@ -1,0 +1,3 @@
+package hu.boltseged.account;
+import org.springframework.boot.*; import org.springframework.context.annotation.*; import org.springframework.beans.factory.annotation.Value; import org.springframework.security.crypto.password.PasswordEncoder;
+@Configuration public class AccountInitializer { @Bean CommandLineRunner admin(AccountRepository r,PasswordEncoder e,@Value("${app.admin.email:}")String email,@Value("${app.admin.password:}")String password){return args->{if(!email.isBlank()&&!password.isBlank()&&r.findByEmailIgnoreCase(email).isEmpty())r.save(new Account("Boltséged admin",email,e.encode(password),"ADMIN"));};} }

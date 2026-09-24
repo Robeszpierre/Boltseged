@@ -1,0 +1,9 @@
+#!/bin/sh
+BASE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+MVN="$BASE/.mvn/wrapper/apache-maven-3.9.9/bin/mvn"
+if [ ! -x "$MVN" ]; then
+  command -v curl >/dev/null || { echo "curl is required to bootstrap Maven" >&2; exit 1; }
+  mkdir -p "$BASE/.mvn/wrapper"
+  curl -fsSL https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.9/apache-maven-3.9.9-bin.tar.gz | tar -xz -C "$BASE/.mvn/wrapper"
+fi
+exec "$MVN" "$@"

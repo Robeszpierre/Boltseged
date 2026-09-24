@@ -1,0 +1,4 @@
+package hu.boltseged.config;
+import org.springframework.web.server.ResponseStatusException;
+import hu.boltseged.shipping.DhlApiException; import org.springframework.http.*; import org.springframework.web.bind.annotation.*; import java.util.*;
+@RestControllerAdvice public class ApiExceptionHandler { @ExceptionHandler(DhlApiException.class) ResponseEntity<Map<String,Object>> dhl(DhlApiException e){return ResponseEntity.status(e.status()).body(Map.of("message","DHL validation failed","details",e.messages()));}@ExceptionHandler(Exception.class) ResponseEntity<Map<String,String>> error(Exception e){if(e instanceof ResponseStatusException x)return ResponseEntity.status(x.getStatusCode()).body(Map.of("message",x.getReason()==null?"Request failed":x.getReason()));return ResponseEntity.badRequest().body(Map.of("message",e.getMessage()==null?"Request failed":e.getMessage()));} }

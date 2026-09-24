@@ -1,0 +1,3 @@
+ALTER TABLE accounts
+  ALTER COLUMN company_name DROP NOT NULL,
+  ALTER COLUMN contact_name DROP NOT NULL;

@@ -1,0 +1,160 @@
+.form > .card {
+  margin-bottom: 20px;
+}
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.section-head h2,
+.section-head h3 {
+  margin: 0;
+}
+.optional {
+  font-weight: 400;
+  color: #68757d;
+  font-size: 0.8em;
+}
+.address-grid,
+.package-grid,
+.customs-grid,
+.review-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.package-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.customs-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.wide {
+  grid-column: span 2;
+}
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.checkbox input {
+  width: auto;
+}
+.package-form,
+.customs-item {
+  margin: 16px 0;
+  padding: 18px;
+  border: 1px solid #dfe8e7;
+  border-radius: 10px;
+}
+.quote-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+}
+.quote-card {
+  display: flex;
+  gap: 12px;
+  border: 1px solid #dfe8e7;
+  border-radius: 10px;
+  padding: 16px;
+  cursor: pointer;
+}
+.quote-card.selected {
+  border-color: #d35c35;
+  background: #fff6f2;
+}
+.quote-card input {
+  width: auto;
+  align-self: start;
+}
+.quote-card span {
+  display: grid;
+  gap: 5px;
+}
+.quote-card small,
+.quote-card em {
+  color: #68757d;
+  font-style: normal;
+}
+.quote-card b {
+  font-size: 1.2rem;
+}
+.review-grid {
+  margin: 0 0 20px;
+}
+.review-grid p {
+  margin: 0;
+  line-height: 1.5;
+}
+.success-state {
+  max-width: 820px;
+  margin: auto;
+}
+.success-state > .card {
+  margin: 20px 0;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+.pickup-shipment {
+  display: flex;
+  grid-template-columns: none;
+  gap: 12px;
+  align-items: flex-start;
+  margin: 10px 0;
+  padding: 14px;
+  border: 1px solid #dfe8e7;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.pickup-shipment input {
+  width: auto;
+  margin-top: 3px;
+}
+.pickup-history,
+form > .card {
+  margin-top: 20px;
+}
+textarea {
+  width: 100%;
+  min-height: 90px;
+  padding: 12px;
+  border: 1px solid #ccd9d7;
+  border-radius: 7px;
+  font: inherit;
+  resize: vertical;
+}
+@media (max-width: 700px) {
+  .address-grid,
+  .package-grid,
+  .customs-grid,
+  .review-grid {
+    grid-template-columns: 1fr;
+  }
+  .wide {
+    grid-column: auto;
+  }
+  .package-form,
+  .customs-item {
+    padding: 14px;
+  }
+  .section-head {
+    align-items: flex-start;
+  }
+  .section-head .link-button {
+    white-space: nowrap;
+  }
+  .actions {
+    display: grid;
+  }
+  .actions .button,
+  .actions button {
+    text-align: center;
+    width: 100%;
+  }
+}

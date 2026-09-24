@@ -1,0 +1,16 @@
+package hu.boltseged.pickup;
+
+import com.fasterxml.jackson.core.type.TypeReference; import com.fasterxml.jackson.databind.ObjectMapper; import hu.boltseged.account.Account; import jakarta.validation.Valid; import jakarta.validation.constraints.*; import org.springframework.http.*; import org.springframework.security.core.context.SecurityContextHolder; import org.springframework.web.bind.annotation.*; import java.math.BigDecimal; import java.time.*; import java.util.*;
+
+@RestController @RequestMapping("/api/pickups") public class PickupController {
+  private final PickupService service; private final ObjectMapper json;
+  PickupController(PickupService service,ObjectMapper json){this.service=service;this.json=json;}
+  @GetMapping List<View> list(){return service.list(current()).stream().map(this::view).toList();}
+  @PostMapping ResponseEntity<View> create(@Valid @RequestBody CreateRequest request){return ResponseEntity.status(HttpStatus.CREATED).body(view(service.create(current(),request)));}
+  @DeleteMapping("/{id}") View cancel(@PathVariable UUID id){return view(service.cancel(current(),id));}
+  private View view(PickupBooking b){return new View(b.getId(),read(b.getDispatchConfirmationNumbers()),read(b.getWarnings()),b.getPickupDate(),b.getReadyTime(),b.getCloseTime(),tree(b.getPickupAddress()),b.getPackageCount(),b.getTotalWeight(),b.getStatus(),b.getCreatedAt());}
+  private List<String> read(String x){try{return json.readValue(x,new TypeReference<>(){});}catch(Exception e){return List.of();}} private Object tree(String x){try{return json.readTree(x);}catch(Exception e){return Map.of();}} private Account current(){Account account=(Account)SecurityContextHolder.getContext().getAuthentication().getPrincipal();if(!"CUSTOMER".equals(account.getRole()))throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN);return account;}
+  public record AddressRequest(@NotBlank String companyName,@NotBlank String contactName,@NotBlank @Pattern(regexp="[A-Z]{2}")String countryCode,@NotBlank String postalCode,@NotBlank String cityName,@NotBlank String addressLine1,String addressLine2,String stateOrProvinceCode,@NotBlank String phone,@Email String email){}
+  public record CreateRequest(@NotNull @Size(min=1)List<UUID> shipmentIds,@NotNull LocalDate pickupDate,@NotNull LocalTime readyTime,@NotNull LocalTime closeTime,@Valid @NotNull AddressRequest address,@NotBlank @Pattern(regexp="business|residence")String locationType,@Size(max=100)String location,@Size(max=250)String specialInstructions){@AssertTrue(message="readyTime must be before closeTime")public boolean isWindowValid(){return readyTime==null||closeTime==null||readyTime.isBefore(closeTime);}@AssertTrue(message="pickupDate must be between tomorrow and 10 days ahead")public boolean isDateRangeValid(){if(pickupDate==null)return true;LocalDate today=LocalDate.now(ZoneId.of("Europe/Budapest"));return pickupDate.isAfter(today)&&!pickupDate.isAfter(today.plusDays(10));}}
+  public record View(UUID id,List<String> dispatchConfirmationNumbers,List<String> warnings,LocalDate pickupDate,LocalTime readyTime,LocalTime closeTime,Object address,int packageCount,BigDecimal totalWeight,String status,Instant createdAt){}
+}

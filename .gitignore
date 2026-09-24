@@ -1,0 +1,63 @@
+# Secrets / environment
+.env
+.env.*
+!.env.example
+
+# Backend
+backend/target/
+*.log
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime data
+data/
+labels/
+
+# Maven downloaded distribution
+backend/.mvn/wrapper/apache-maven-*/
+
+# TypeScript build artifacts
+frontend/tsconfig.tsbuildinfo
+
+# Generated frontend JS beside TS/Vue sources
+frontend/src/*.js
+frontend/src/views/*.js
+
+# Local test/request artifacts
+*-test.json
+profile.json
+register-test.json
+customer-update.json
+label-headers.txt
+*.pdf
+
+# Local backend artifacts
+running-backend*.jar
+
+# Maven downloaded distribution
+backend/.mvn/wrapper/apache-maven-*/
+# TypeScript build artifacts
+frontend/tsconfig.tsbuildinfo
+# Generated frontend JS beside TS/Vue sources
+frontend/src/*.js
+frontend/src/views/*.js
+# Local test/request artifacts
+*-test.json
+profile.json
+register-test.json
+customer-update.json
+label-headers.txt
+*.pdf
+# Local backend artifacts
+running-backend*.jar

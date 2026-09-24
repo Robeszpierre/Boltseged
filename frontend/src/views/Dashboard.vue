@@ -1,0 +1,12 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import { api, ApiError } from '../api'
+import { money, statusLabel } from '../customer'
+const shipments = ref<any[]>([]), profile = ref<any>({}), loading = ref(true), error = ref('')
+const recent = computed(() => shipments.value.slice(0, 5))
+const profileComplete = computed(() => ['companyName', 'taxNumber', 'billingAddress', 'contactName'].every(key => Boolean(profile.value[key]?.trim?.())))
+const recipient = (shipment: any) => shipment.recipient?.companyName || shipment.recipient?.contactName || '—'
+async function load() { try { [shipments.value, profile.value] = await Promise.all([api('/api/shipments'), api('/api/account/profile')]) } catch (e) { error.value = e instanceof ApiError ? e.message : 'Az adatok betöltése nem sikerült.' } finally { loading.value = false } }
+onMounted(load)
+</script>
+<template><div class="hero"><div><p class="eyebrow">Partneri felület</p><h1>Áttekintés</h1><p class="muted">Kövesd küldeményeidet egy helyen.</p></div><RouterLink class="button" to="/shipments/new">+ Új küldemény</RouterLink></div><p v-if="error" class="alert error">{{ error }}</p><section v-if="!profileComplete && !loading" class="card profile-warning"><div><strong>Cégadataid még nincsenek teljesen kitöltve.</strong><p class="muted">A számlázáshoz és kapcsolattartáshoz később is megadhatod az adatokat.</p></div><RouterLink class="button secondary" to="/company-profile">Cégadatok kitöltése</RouterLink></section><section class="card"><div class="card-head"><h2>Legutóbbi küldemények</h2><span>{{ shipments.length }} küldemény</span></div><div v-if="loading" class="empty">Betöltés…</div><div v-else-if="!shipments.length" class="empty">Még nincs küldeményed.<br><RouterLink class="button" to="/shipments/new">Első küldemény létrehozása</RouterLink></div><table v-else><thead><tr><th>Dátum</th><th>Címzett</th><th>Nyomkövetés</th><th>Ügyfélár</th><th>Státusz</th></tr></thead><tbody><tr v-for="s in recent" :key="s.id"><td>{{ new Date(s.createdAt).toLocaleDateString('hu-HU') }}</td><td>{{ recipient(s) }}</td><td><RouterLink :to="`/shipments/${s.id}`">{{ s.masterTrackingNumber || 'Feldolgozás alatt' }}</RouterLink></td><td>{{ money(s.customerPrice ?? 0, s.currency) }}</td><td><span class="pill">{{ statusLabel(s.status) }}</span></td></tr></tbody></table><RouterLink v-if="shipments.length > 5" class="text-link" to="/shipments">Összes küldemény megtekintése</RouterLink></section></template>

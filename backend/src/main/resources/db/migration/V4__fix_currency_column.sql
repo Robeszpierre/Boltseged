@@ -1,0 +1,1 @@
+ALTER TABLE shipments ALTER COLUMN currency TYPE VARCHAR(3) USING TRIM(currency);
