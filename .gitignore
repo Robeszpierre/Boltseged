@@ -61,3 +61,5 @@ label-headers.txt
 *.pdf
 # Local backend artifacts
 running-backend*.jar
+
+!.env.prod.example
