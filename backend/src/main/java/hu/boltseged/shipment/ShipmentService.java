@@ -119,14 +119,32 @@ public class ShipmentService {
   private Map<String, Object> customsSnapshot(ShipmentController.CreateRequest request) {
     Map<String, Object> snapshot = new LinkedHashMap<>();
     snapshot.put("customsDeclarable", request.customsDeclarable());
+    snapshot.put("description", request.description());
     if (request.customsDeclarable()) {
       BigDecimal declaredValue = request.exportDeclaration().lineItems().stream()
           .map(item -> item.price().multiply(BigDecimal.valueOf(item.quantity())))
           .reduce(BigDecimal.ZERO, BigDecimal::add);
       snapshot.put("declaredValue", declaredValue);
       snapshot.put("declaredValueCurrency", request.declaredValueCurrency());
+      snapshot.put("incoterm", request.incoterm());
+      snapshot.put("lineItems", request.exportDeclaration().lineItems().stream().map(this::copyLineItem).toList());
     }
     return snapshot;
+  }
+
+  private Map<String, Object> copyLineItem(ShipmentController.ExportLineItemRequest item) {
+    Map<String, Object> line = new LinkedHashMap<>();
+    line.put("number", item.number());
+    line.put("description", item.description());
+    line.put("price", item.price());
+    line.put("quantity", item.quantity());
+    line.put("quantityUnitOfMeasurement", item.quantityUnitOfMeasurement());
+    line.put("manufacturerCountry", item.manufacturerCountry());
+    line.put("netWeight", item.netWeight());
+    line.put("grossWeight", item.grossWeight());
+    line.put("exportReasonType", item.exportReasonType());
+    line.put("commodityCode", item.commodityCode());
+    return line;
   }
 
   private ShippingProvider.QuoteRequest toQuote(ShippingProvider.Address sender, ShipmentController.AddressRequest recipient,

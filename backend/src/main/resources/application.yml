@@ -13,6 +13,8 @@ server:
 app:
   jwt-secret: ${JWT_SECRET:local-development-secret-change-this-32-chars}
   jwt-expiration-minutes: ${JWT_EXPIRATION_MINUTES:480}
+  refresh-session-days: ${REFRESH_SESSION_DAYS:30}
+  refresh-cookie-secure: ${REFRESH_COOKIE_SECURE:false}
   admin.email: ${ADMIN_EMAIL:}
   admin.password: ${ADMIN_PASSWORD:}
   labels.path: ${LABEL_STORAGE_PATH:./data/labels}

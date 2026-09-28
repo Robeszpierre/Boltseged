@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { api, apiBlob, ApiError } from "../api";
 import { money, dateTime, productLabel, statusLabel } from "../customer";
 import "./new-shipment.css";
@@ -45,6 +46,18 @@ type Q = {
   estimatedCost: number;
   currency: string;
   estimatedDelivery?: string;
+};
+type CopySource = {
+  productCode?: string;
+  recipient?: Partial<A>;
+  packages?: P[];
+  customs?: {
+    customsDeclarable?: boolean;
+    description?: string;
+    declaredValueCurrency?: string;
+    incoterm?: string;
+    lineItems?: Omit<I, "number">[];
+  };
 };
 const ISO2 = new Set(
   "AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW".split(
@@ -178,6 +191,10 @@ const min = next(),
   created = ref<any>(),
   downloading = ref(""),
   copied = ref("");
+const route = useRoute(),
+  copyLoading = ref(false),
+  copyNotice = ref(""),
+  copiedProductCode = ref("");
 let key = crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 const effectiveCustomsDeclarable = computed(
   () =>
@@ -342,7 +359,9 @@ async function quote() {
       method: "POST",
       body: JSON.stringify(base()),
     });
-    selected.value = undefined;
+    selected.value = copiedProductCode.value
+      ? rates.value.find((rate) => rate.productCode === copiedProductCode.value)
+      : undefined;
     stale.value = false;
   } catch (e) {
     error.value =
@@ -443,17 +462,70 @@ async function copy(x: string) {
     setTimeout(() => (copied.value = ""), 1500);
   }
 }
+function numberOrNull(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+async function loadCopySource() {
+  const sourceId = typeof route.query.copy === "string" ? route.query.copy : "";
+  if (!sourceId) return;
+  copyLoading.value = true;
+  copyNotice.value = "";
+  try {
+    const source = (await api(`/api/shipments/${encodeURIComponent(sourceId)}/copy-source`)) as CopySource;
+    recipient.value = { ...blankA(), ...source.recipient };
+    packages.value = source.packages?.length
+      ? source.packages.map((item) => ({
+          weight: numberOrNull(item.weight),
+          length: numberOrNull(item.length),
+          width: numberOrNull(item.width),
+          height: numberOrNull(item.height),
+        }))
+      : [blankP()];
+    customsOverride.value = source.customs?.customsDeclarable ?? null;
+    description.value = source.customs?.description || "";
+    currency.value = source.customs?.declaredValueCurrency || "";
+    incoterm.value = source.customs?.incoterm || "DAP";
+    items.value = source.customs?.lineItems?.length
+      ? source.customs.lineItems.map((item, index) => ({
+          number: index + 1,
+          description: item.description || "",
+          quantity: numberOrNull(item.quantity),
+          quantityUnitOfMeasurement: item.quantityUnitOfMeasurement || "PCS",
+          price: numberOrNull(item.price),
+          manufacturerCountry: item.manufacturerCountry || "",
+          commodityCode: item.commodityCode || "",
+          netWeight: numberOrNull(item.netWeight),
+          grossWeight: numberOrNull(item.grossWeight),
+          exportReasonType: item.exportReasonType || "",
+        }))
+      : [blankI(1)];
+    documents.value = [];
+    rates.value = [];
+    selected.value = undefined;
+    stale.value = false;
+    copiedProductCode.value = source.productCode || "";
+    copyNotice.value = "Egy korábbi küldemény adatait másoltuk be. Ellenőrizd az adatokat, majd kérj új díjat.";
+  } catch (e) {
+    error.value = e instanceof ApiError
+      ? `A másolandó küldemény nem tölthető be: ${e.message}`
+      : "A másolandó küldemény nem tölthető be. Az új küldemény űrlapja továbbra is használható.";
+  } finally {
+    copyLoading.value = false;
+  }
+}
 onMounted(async () => {
   try {
     profile.value = await api("/api/account/profile");
     useProfile();
+    await loadCopySource();
   } finally {
     loadingProfile.value = false;
   }
 });
 </script>
 <template>
-  <section v-if="created" class="card success-state">
+  <section v-if="copyLoading" class="card empty">A korábbi küldemény adatainak betöltése…</section>
+  <section v-else-if="created" class="card success-state">
     <h1>Küldemény sikeresen létrehozva</h1>
     <p v-if="created.masterTrackingNumber">
       Master tracking: <b>{{ created.masterTrackingNumber }}</b>
@@ -492,6 +564,7 @@ onMounted(async () => {
     <p v-if="error || validation" class="alert error">
       {{ error || validation }}
     </p>
+    <p v-if="copyNotice" class="alert success-text">{{ copyNotice }}</p>
     <section class="card">
       <div class="section-head">
         <h2>1. Feladó</h2>
