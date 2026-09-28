@@ -32,13 +32,17 @@ class DhlShipmentPayloadTest {
   }
 
   @Test
-  void sumsNetAndGrossWeightsAcrossAllCustomsLineItems() {
+  void keepsLineItemWeightsWithoutUnsupportedShipmentTotals() {
     JsonNode declaration = provider.shipmentPayload(customsRequest(List.of()))
         .path("content").path("exportDeclaration");
 
     assertEquals(2, declaration.path("lineItems").size());
-    assertEquals(0, new BigDecimal("2.0").compareTo(declaration.path("totalNetWeight").decimalValue()));
-    assertEquals(0, new BigDecimal("2.5").compareTo(declaration.path("totalGrossWeight").decimalValue()));
+    assertFalse(declaration.has("totalNetWeight"));
+    assertFalse(declaration.has("totalGrossWeight"));
+    assertEquals(0, new BigDecimal("0.8").compareTo(declaration.path("lineItems").get(0).path("weight").path("netValue").decimalValue()));
+    assertEquals(0, BigDecimal.ONE.compareTo(declaration.path("lineItems").get(0).path("weight").path("grossValue").decimalValue()));
+    assertEquals(0, new BigDecimal("1.2").compareTo(declaration.path("lineItems").get(1).path("weight").path("netValue").decimalValue()));
+    assertEquals(0, new BigDecimal("1.5").compareTo(declaration.path("lineItems").get(1).path("weight").path("grossValue").decimalValue()));
   }
 
   @Test
