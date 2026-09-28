@@ -37,6 +37,8 @@ class ShipmentCopySourceTest {
     assertEquals(1, source.packages().size());
     assertEquals("DAP", source.customs().incoterm());
     assertEquals("Wooden gift", source.customs().lineItems().getFirst().description());
+    assertEquals(new BigDecimal("0.8"), source.customs().lineItems().getFirst().netWeight());
+    assertEquals(BigDecimal.ONE, source.customs().lineItems().getFirst().grossWeight());
     assertFalse(List.of(ShipmentController.CopySource.class.getRecordComponents()).stream().anyMatch(component -> component.getName().contains("Price") || component.getName().contains("tracking")));
   }
 

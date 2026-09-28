@@ -41,6 +41,20 @@
 .checkbox input {
   width: auto;
 }
+.field-invalid {
+  border-color: #c84646 !important;
+  background: #fff8f7;
+}
+.field-error {
+  display: block;
+  margin-top: 5px;
+  color: #b33232;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+.action-error {
+  white-space: pre-line;
+}
 .package-form,
 .customs-item {
   margin: 16px 0;

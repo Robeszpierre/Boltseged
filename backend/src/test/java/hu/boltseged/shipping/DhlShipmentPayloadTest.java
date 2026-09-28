@@ -41,6 +41,17 @@ class DhlShipmentPayloadTest {
     assertEquals(0, new BigDecimal("2.5").compareTo(declaration.path("totalGrossWeight").decimalValue()));
   }
 
+  @Test
+  void sendsUsRecipientStateInReceiverPostalAddress() {
+    ShippingProvider.Address usRecipient = new ShippingProvider.Address("Recipient", "Recipient", "US", "94703", "BERKELEY", "Shattuck Ave 1", null, "CA", "+15105550123", "recipient@example.com");
+
+    JsonNode postalAddress = provider.shipmentPayload(new ShippingProvider.CreateRequest("P", address(), usRecipient,
+        LocalDateTime.of(2026, 9, 21, 10, 0), false, "Shipment", null, null, null, null, List.of(parcel()), List.of()))
+        .path("customerDetails").path("receiverDetails").path("postalAddress");
+
+    assertEquals("CA", postalAddress.path("provinceCode").asText());
+  }
+
   private DhlExpressShippingProvider provider() {
     DhlExpressShippingProvider.DhlProperties properties = new DhlExpressShippingProvider.DhlProperties();
     properties.setApiBaseUrl("http://localhost");

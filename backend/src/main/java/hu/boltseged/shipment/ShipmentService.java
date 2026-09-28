@@ -10,6 +10,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.math.*;
@@ -21,6 +23,7 @@ import java.util.*;
 @Service
 public class ShipmentService {
   private static final String INCOMPLETE_SENDER = "A küldemény létrehozásához előbb töltsd ki a Feladói adatok menüpontban a szükséges céges adatokat.";
+  private static final Logger log = LoggerFactory.getLogger(ShipmentService.class);
 
   private final ShipmentRepository shipments;
   private final ShipmentLabelRepository labels;
@@ -38,7 +41,7 @@ public class ShipmentService {
 
   public List<ShipmentController.CustomerQuote> quote(Account account, ShipmentController.QuoteRequest request) {
     ShippingProvider.Address sender = sender(account);
-    return dhl.quote(toQuote(sender, request.recipient(), request.plannedShippingDateAndTime(), request.customsDeclarable(), request.packages())).stream()
+    return dhl.quote(toQuote(sender, address(request.recipient()), request.plannedShippingDateAndTime(), request.customsDeclarable(), request.packages())).stream()
         .map(q -> new ShipmentController.CustomerQuote(q.productCode(), q.productName(), PricingCalculator.customerPrice(account, q.estimatedCost()), q.currency(), q.estimatedDelivery()))
         .toList();
   }
@@ -46,25 +49,34 @@ public class ShipmentService {
   public Shipment create(Account account, String key, ShipmentController.CreateRequest request) {
     Shipment old = shipments.findByAccountIdAndIdempotencyKey(account.getId(), key).orElse(null);
     if (old != null) return old;
+    validateRecipient(request.recipient());
+    validateCustomsWeights(request);
     ShippingProvider.Address sender = sender(account);
-    Shipment pending = createPending(account, key, request, sender);
+    ShippingProvider.Address recipient = address(request.recipient());
+    ShippingProvider.Quote selected = dhl.quote(toQuote(sender, recipient, request.plannedShippingDateAndTime(), request.customsDeclarable(), request.packages())).stream()
+        .filter(q -> q.productCode().equals(request.productCode()))
+        .findFirst()
+        .orElseThrow(() -> new DhlApiException(HttpStatus.BAD_REQUEST, List.of("The selected DHL product is no longer available")));
+    Shipment pending = createPending(account, key, request, sender, recipient, selected.currency());
     try {
-      ShippingProvider.Quote selected = dhl.quote(toQuote(sender, request.recipient(), request.plannedShippingDateAndTime(), request.customsDeclarable(), request.packages())).stream()
-          .filter(q -> q.productCode().equals(request.productCode()))
-          .findFirst()
-          .orElseThrow(() -> new DhlApiException(HttpStatus.BAD_REQUEST, List.of("The selected DHL product is no longer available")));
-      return complete(pending.getId(), dhl.create(toCreate(sender, request, key)), selected.estimatedCost(), selected.currency());
+      return complete(pending.getId(), dhl.create(toCreate(sender, recipient, request, key)), selected.estimatedCost(), selected.currency());
+    } catch (DhlApiException e) {
+      log.warn("DHL shipment creation failed for shipment {} with HTTP {}: {}", pending.getId(), e.status().value(), String.join(" | ", e.messages()));
+      markFailed(pending.getId(), dhlFailureReason(e));
+      throw e;
     } catch (RuntimeException e) {
-      markFailed(pending.getId());
+      log.warn("Shipment creation failed for shipment {}: {}", pending.getId(), e.getMessage());
+      markFailed(pending.getId(), "A küldemény létrehozása sikertelen volt. Próbáld meg később újra.");
       throw e;
     }
   }
 
   @Transactional
-  public Shipment createPending(Account account, String key, ShipmentController.CreateRequest request, ShippingProvider.Address sender) {
+  public Shipment createPending(Account account, String key, ShipmentController.CreateRequest request, ShippingProvider.Address sender, ShippingProvider.Address recipient, String currency) {
     try {
-      Shipment shipment = new Shipment(account, key, request.productCode(), request.shipDate(), safe(sender), safe(request.recipient()),
+      Shipment shipment = new Shipment(account, key, request.productCode(), request.shipDate(), safe(sender), safe(recipient),
           request.packages().stream().map(p -> new Shipment.PackageInput(p.weight(), p.length(), p.width(), p.height())).toList());
+      shipment.setQuoteCurrency(currency);
       shipment.setCustoms(safe(customsSnapshot(request)));
       return shipments.saveAndFlush(shipment);
     } catch (DataIntegrityViolationException e) {
@@ -90,11 +102,40 @@ public class ShipmentService {
   }
 
   @Transactional
-  public void markFailed(UUID id) {
+  public void markFailed(UUID id, String reason) {
     shipments.findById(id).ifPresent(shipment -> {
-      shipment.fail();
+      shipment.fail(reason);
       shipments.save(shipment);
     });
+  }
+
+  private void validateRecipient(ShipmentController.AddressRequest recipient) {
+    if ("US".equals(recipient.countryCode()) && (recipient.stateOrProvinceCode() == null || !recipient.stateOrProvinceCode().matches("[A-Za-z]{2}"))) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Amerikai címzettnél add meg a kétbetűs államkódot.");
+    }
+  }
+
+  private void validateCustomsWeights(ShipmentController.CreateRequest request) {
+    if (!request.customsDeclarable()) return;
+    if (request.exportDeclaration() == null || request.exportDeclaration().lineItems() == null || request.packages() == null) return;
+    for (ShipmentController.ExportLineItemRequest item : request.exportDeclaration().lineItems()) {
+      if (item.netWeight() == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Add meg a tétel nettó tömegét.");
+      if (item.grossWeight() == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Add meg a tétel bruttó tömegét.");
+      if (item.netWeight().signum() <= 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A nettó tömegnek 0-nál nagyobbnak kell lennie.");
+      if (item.grossWeight().signum() <= 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A bruttó tömegnek 0-nál nagyobbnak kell lennie.");
+      if (item.grossWeight().compareTo(item.netWeight()) < 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A bruttó tömeg nem lehet kisebb a nettó tömegnél.");
+    }
+    BigDecimal customsGross = request.exportDeclaration().lineItems().stream().map(ShipmentController.ExportLineItemRequest::grossWeight).reduce(BigDecimal.ZERO, BigDecimal::add);
+    BigDecimal packageWeight = request.packages().stream().map(ShipmentController.PackageRequest::weight).filter(Objects::nonNull).reduce(BigDecimal.ZERO, BigDecimal::add);
+    if (customsGross.compareTo(packageWeight) > 0) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A vámáruk összes bruttó tömege nem lehet nagyobb a csomagok teljes súlyánál.");
+    }
+  }
+
+  private String dhlFailureReason(DhlApiException error) {
+    String details = String.join(" ", error.messages()).replaceAll("[\\r\\n]+", " ").trim();
+    if (details.isBlank()) return "A DHL nem tudta feldolgozni a küldeményt. Ellenőrizd az adatokat és próbáld újra.";
+    return details.length() <= 2000 ? details : details.substring(0, 2000);
   }
 
   private ShippingProvider.Address sender(Account account) {
@@ -147,19 +188,19 @@ public class ShipmentService {
     return line;
   }
 
-  private ShippingProvider.QuoteRequest toQuote(ShippingProvider.Address sender, ShipmentController.AddressRequest recipient,
+  private ShippingProvider.QuoteRequest toQuote(ShippingProvider.Address sender, ShippingProvider.Address recipient,
       java.time.LocalDateTime planned, boolean customsDeclarable, List<ShipmentController.PackageRequest> packages) {
-    return new ShippingProvider.QuoteRequest(sender, address(recipient), planned, customsDeclarable, packages(packages));
+    return new ShippingProvider.QuoteRequest(sender, recipient, planned, customsDeclarable, packages(packages));
   }
 
-  private ShippingProvider.CreateRequest toCreate(ShippingProvider.Address sender, ShipmentController.CreateRequest request, String key) {
+  private ShippingProvider.CreateRequest toCreate(ShippingProvider.Address sender, ShippingProvider.Address recipient, ShipmentController.CreateRequest request, String key) {
     ShippingProvider.ExportDeclaration declaration = exportDeclaration(request.exportDeclaration(), key);
     BigDecimal declaredValue = request.customsDeclarable()
         ? request.exportDeclaration().lineItems().stream().map(i -> i.price().multiply(BigDecimal.valueOf(i.quantity()))).reduce(BigDecimal.ZERO, BigDecimal::add)
         : null;
     List<ShippingProvider.CustomsDocument> documents = request.customsDocuments() == null ? List.of()
         : request.customsDocuments().stream().map(d -> new ShippingProvider.CustomsDocument(d.typeCode(), d.imageFormat(), d.content())).toList();
-    return new ShippingProvider.CreateRequest(request.productCode(), sender, address(request.recipient()), request.plannedShippingDateAndTime(),
+    return new ShippingProvider.CreateRequest(request.productCode(), sender, recipient, request.plannedShippingDateAndTime(),
         request.customsDeclarable(), request.description(), declaredValue, request.declaredValueCurrency(), request.incoterm(), declaration,
         packages(request.packages()), documents);
   }

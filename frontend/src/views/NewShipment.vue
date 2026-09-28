@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { api, apiBlob, ApiError } from "../api";
 import { money, dateTime, productLabel, statusLabel } from "../customer";
@@ -16,22 +16,23 @@ type A = {
   phone: string;
   email: string;
 };
+type Decimal = number | string | null;
 type P = {
-  weight: number | null;
-  length: number | null;
-  width: number | null;
-  height: number | null;
+  weight: Decimal;
+  length: Decimal;
+  width: Decimal;
+  height: Decimal;
 };
 type I = {
   number: number;
   description: string;
   quantity: number | null;
   quantityUnitOfMeasurement: string;
-  price: number | null;
+  price: Decimal;
   manufacturerCountry: string;
   commodityCode: string;
-  netWeight: number | null;
-  grossWeight: number | null;
+  netWeight: Decimal;
+  grossWeight: Decimal;
   exportReasonType: string;
 };
 type D = {
@@ -185,8 +186,11 @@ const min = next(),
   selected = ref<Q>(),
   quoteLoading = ref(false),
   creating = ref(false),
-  error = ref(""),
-  validation = ref(""),
+  quoteError = ref(""),
+  createError = ref(""),
+  senderError = ref(""),
+  fieldErrors = ref<Record<string, string>>({}),
+  validationStarted = ref(false),
   stale = ref(false),
   created = ref<any>(),
   downloading = ref(""),
@@ -196,6 +200,18 @@ const route = useRoute(),
   copyNotice = ref(""),
   copiedProductCode = ref("");
 let key = crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+const fieldElements = new Map<string, HTMLElement>();
+const actionElements = new Map<string, HTMLElement>();
+const fieldRef = (path: string) => (element: unknown) => {
+  if (element instanceof HTMLElement) fieldElements.set(path, element);
+  else fieldElements.delete(path);
+};
+const actionRef = (name: string) => (element: unknown) => {
+  if (element instanceof HTMLElement) actionElements.set(name, element);
+  else actionElements.delete(name);
+};
+const hasError = (path: string) => Boolean(fieldErrors.value[path]);
+const errorFor = (path: string) => fieldErrors.value[path];
 const effectiveCustomsDeclarable = computed(
   () =>
     customsOverride.value ??
@@ -243,63 +259,135 @@ watch(
   },
   { deep: true },
 );
+watch(
+  [recipient, packages, items, currency, incoterm, description, invoiceDate, effectiveCustomsDeclarable],
+  () => {
+    if (validationStarted.value) validateFields();
+  },
+  { deep: true },
+);
 const total = computed(() =>
-    packages.value.reduce((n, p) => n + (Number(p.weight) || 0), 0),
+    packages.value.reduce((n, p) => n + (decimalNumber(p.weight) || 0), 0),
   ),
   declared = computed(() =>
     items.value.reduce(
-      (n, i) => n + (Number(i.price) || 0) * (Number(i.quantity) || 0),
+      (n, i) => n + (decimalNumber(i.price) || 0) * (Number(i.quantity) || 0),
       0,
     ),
   );
+function decimalNumber(value: Decimal) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const normalized = value?.trim().replace(",", ".") || "";
+  if (!/^\d+(?:\.\d+)?$/.test(normalized)) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+function decimalInput(event: Event) {
+  const input = event.target as HTMLInputElement;
+  let separator = false;
+  input.value = [...input.value].filter((character) => {
+    if (/\d/.test(character)) return true;
+    if ((character === "," || character === ".") && !separator) {
+      separator = true;
+      return true;
+    }
+    return false;
+  }).join("");
+  return input.value;
+}
 const country = (v: string) => v.trim().toUpperCase();
 const validCountry = (v: string) => ISO2.has(country(v));
-function valid() {
-  let m = "";
+function addError(path: string, message: string) {
+  if (!fieldErrors.value[path]) fieldErrors.value[path] = message;
+}
+async function focusField(path: string) {
+  await nextTick();
+  const element = fieldElements.get(path);
+  element?.scrollIntoView({ behavior: "smooth", block: "center" });
+  element?.focus({ preventScroll: true });
+}
+async function focusAction(name: string) {
+  await nextTick();
+  actionElements.get(name)?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+function validateFields() {
+  validationStarted.value = true;
+  fieldErrors.value = {};
+  const a = recipient.value;
+  if (!a.companyName) addError("recipient.companyName", "Add meg a címzett cégnevét.");
+  if (!a.contactName) addError("recipient.contactName", "Add meg a címzett kapcsolattartójának nevét.");
+  if (!a.countryCode) addError("recipient.countryCode", "Add meg a címzett országkódját.");
+  else if (!validCountry(a.countryCode)) addError("recipient.countryCode", "Adj meg érvényes, kétbetűs ISO országkódot.");
+  if (!a.stateOrProvinceCode && country(a.countryCode) === "US") addError("recipient.stateOrProvinceCode", "Amerikai címzettnél add meg a kétbetűs államkódot.");
+  else if (a.stateOrProvinceCode && country(a.countryCode) === "US" && !/^[A-Za-z]{2}$/.test(a.stateOrProvinceCode)) addError("recipient.stateOrProvinceCode", "Az államkód pontosan két betű legyen.");
+  if (!a.postalCode) addError("recipient.postalCode", "Add meg a címzett irányítószámát.");
+  if (!a.cityName) addError("recipient.cityName", "Add meg a címzett városát.");
+  if (!a.addressLine1) addError("recipient.addressLine1", "Add meg a címzett címét.");
+  if (!a.phone) addError("recipient.phone", "Add meg a címzett telefonszámát.");
+  if (a.email && !/^\S+@\S+\.\S+$/.test(a.email)) addError("recipient.email", "Adj meg érvényes e-mail-címet.");
+  packages.value.forEach((p, index) => {
+    (["weight", "length", "width", "height"] as const).forEach((field) => {
+      const value = p[field];
+      const labels = { weight: "súlyát", length: "hosszát", width: "szélességét", height: "magasságát" };
+      if (value === null || value === undefined || value === "") addError(`packages.${index}.${field}`, `Add meg a csomag ${labels[field]}.`);
+      else if (!(decimalNumber(value) && decimalNumber(value)! > 0)) addError(`packages.${index}.${field}`, `A csomag ${labels[field]} 0-nál nagyobb legyen.`);
+    });
+  });
+  if (effectiveCustomsDeclarable.value) {
+    if (!/^[A-Z]{3}$/.test(currency.value)) addError("customs.currency", "Adj meg hárombetűs pénznemkódot.");
+    if (!invoiceDate.value) addError("customs.invoiceDate", "Add meg a számla dátumát.");
+    if (!incoterm.value) addError("customs.incoterm", "Válassz Incotermet.");
+    if (!description.value) addError("customs.description", "Add meg a küldemény leírását.");
+    items.value.forEach((item, index) => {
+      const path = `exportDeclaration.lineItems.${index}`;
+      if (!item.description) addError(`${path}.description`, "Add meg a vámtétel megnevezését.");
+      if (item.quantity === null || item.quantity === undefined) addError(`${path}.quantity`, "Add meg a mennyiséget.");
+      else if (!(Number(item.quantity) > 0)) addError(`${path}.quantity`, "A mennyiség 0-nál nagyobb legyen.");
+      if (item.price === null || item.price === undefined) addError(`${path}.price`, "Add meg az egységárat.");
+      else if (!(decimalNumber(item.price) && decimalNumber(item.price)! > 0)) addError(`${path}.price`, "Az egységár 0-nál nagyobb legyen.");
+      if (!validCountry(item.manufacturerCountry)) addError(`${path}.manufacturerCountry`, "Adj meg érvényes, kétbetűs származási országkódot.");
+      if (!item.exportReasonType) addError(`${path}.exportReasonType`, "Válaszd ki az export okát.");
+      const netWeight = decimalNumber(item.netWeight), grossWeight = decimalNumber(item.grossWeight);
+      if (item.netWeight === null || item.netWeight === undefined || item.netWeight === "") addError(`${path}.netWeight`, "Add meg a tétel nettó tömegét.");
+      else if (!(netWeight && netWeight > 0)) addError(`${path}.netWeight`, "A nettó tömegnek 0-nál nagyobbnak kell lennie.");
+      if (item.grossWeight === null || item.grossWeight === undefined || item.grossWeight === "") addError(`${path}.grossWeight`, "Add meg a tétel bruttó tömegét.");
+      else if (!(grossWeight && grossWeight > 0)) addError(`${path}.grossWeight`, "A bruttó tömegnek 0-nál nagyobbnak kell lennie.");
+      else if (netWeight && grossWeight < netWeight) addError(`${path}.grossWeight`, "A bruttó tömeg nem lehet kisebb a nettó tömegnél.");
+    });
+  }
+  return Object.keys(fieldErrors.value);
+}
+async function validateAndFocus() {
+  const paths = validateFields();
+  if (paths.length) {
+    await focusField(paths[0]);
+    return false;
+  }
   if (!senderProfileComplete.value) {
-    m = "A küldemény létrehozásához előbb töltsd ki a Feladói adatok menüpontban a szükséges céges adatokat.";
+    senderError.value = "A küldemény létrehozásához előbb töltsd ki a Feladói adatok menüpontban a szükséges céges adatokat.";
+    await focusAction("sender");
+    return false;
   }
-  for (const [name, a] of [["Címzett", recipient.value]] as const) {
-    if (m) break;
-    if (
-      !a.companyName ||
-      !a.contactName ||
-      !validCountry(a.countryCode) ||
-      !a.postalCode ||
-      !a.cityName ||
-      !a.addressLine1 ||
-      !a.phone ||
-      (a.email && !/^\S+@\S+\.\S+$/.test(a.email))
-    ) {
-      m = `${name}: tölts ki minden kötelező mezőt, az országkód pedig érvényes ISO-2 kód legyen.`;
-      break;
-    }
+  return true;
+}
+function mapBackendErrors(error: ApiError) {
+  const messages = error.details.length ? error.details : [error.message];
+  fieldErrors.value = {};
+  for (const message of messages) {
+    const value = message.toLowerCase();
+    const lineItem = value.match(/lineitems?[.\[](\d+)[\].]([a-z]+)/);
+    const parcel = value.match(/packages?[.\[](\d+)[\].]([a-z]+)/);
+    const lineFields: Record<string, string> = { description: "description", quantity: "quantity", price: "price", manufacturercountry: "manufacturerCountry", exportreasontype: "exportReasonType", netweight: "netWeight", grossweight: "grossWeight" };
+    if (lineItem && lineFields[lineItem[2]]) addError(`exportDeclaration.lineItems.${lineItem[1]}.${lineFields[lineItem[2]]}`, message);
+    else if (parcel && ["weight", "length", "width", "height"].includes(parcel[2])) addError(`packages.${parcel[1]}.${parcel[2]}`, message);
+    else if (value.includes("declaredvaluecurrency") || value.includes("currency")) addError("customs.currency", message);
+    else if (value.includes("incoterm")) addError("customs.incoterm", message);
+    else if (value.includes("államkód") || value.includes("stateorprovince")) addError("recipient.stateOrProvinceCode", message);
+    else if (value.includes("irányítószám") || value.includes("postal")) addError("recipient.postalCode", message);
+    else if (value.includes("város") || value.includes("city")) addError("recipient.cityName", message);
+    else if (value.includes("címzett cím") || value.includes("addressline1")) addError("recipient.addressLine1", message);
   }
-  if (
-    !m &&
-    packages.value.some((p) =>
-      [p.weight, p.length, p.width, p.height].some((x) => !(Number(x) > 0)),
-    )
-  )
-    m = "Minden csomagnál adj meg pozitív súlyt és méreteket.";
-  if (
-    !m &&
-    effectiveCustomsDeclarable.value &&
-    (!/^[A-Z]{3}$/.test(currency.value) ||
-      !description.value ||
-      items.value.some(
-        (i) =>
-          !i.description ||
-          !(Number(i.quantity) > 0) ||
-          !(Number(i.price) > 0) ||
-          !validCountry(i.manufacturerCountry) ||
-          !reasons.some((r) => r[0] === i.exportReasonType) ||
-          (!(Number(i.netWeight) > 0) && !(Number(i.grossWeight) > 0)),
-      ))
-  )
-    m = "Tölts ki minden kötelező vámadatot.";
-  validation.value = m;
-  return !m;
+  return Object.keys(fieldErrors.value);
 }
 const base = () => ({
   sender: { ...sender.value, countryCode: country(sender.value.countryCode) },
@@ -309,7 +397,12 @@ const base = () => ({
   },
   plannedShippingDateAndTime: `${pickupDate.value}T10:00:00`,
   customsDeclarable: effectiveCustomsDeclarable.value,
-  packages: packages.value,
+  packages: packages.value.map((item) => ({
+    weight: decimalNumber(item.weight),
+    length: decimalNumber(item.length),
+    width: decimalNumber(item.width),
+    height: decimalNumber(item.height),
+  })),
 });
 async function fileData(file: File) {
   return new Promise<string>((ok, fail) => {
@@ -330,11 +423,11 @@ async function addFiles(list: FileList | File[]) {
             ? "JPEG"
             : "";
     if (!format) {
-      error.value = "Nem támogatott fájltípus. PDF, JPG vagy PNG tölthető fel.";
+      quoteError.value = "Nem támogatott fájltípus. PDF, JPG vagy PNG tölthető fel.";
       continue;
     }
     if (file.size > 5 * 1024 * 1024) {
-      error.value = "A fájl legfeljebb 5 MB lehet.";
+      quoteError.value = "A fájl legfeljebb 5 MB lehet.";
       continue;
     }
     if (
@@ -351,8 +444,10 @@ function drop(e: DragEvent) {
   if (e.dataTransfer?.files) addFiles(e.dataTransfer.files);
 }
 async function quote() {
-  error.value = "";
-  if (!valid()) return;
+  quoteError.value = "";
+  createError.value = "";
+  senderError.value = "";
+  if (!(await validateAndFocus())) return;
   quoteLoading.value = true;
   try {
     rates.value = await api("/api/shipments/quotes", {
@@ -364,20 +459,32 @@ async function quote() {
       : undefined;
     stale.value = false;
   } catch (e) {
-    error.value =
-      e instanceof ApiError ? e.message : "A díjak lekérése nem sikerült.";
+    if (e instanceof ApiError) {
+      const paths = mapBackendErrors(e);
+      if (paths.length) await focusField(paths[0]);
+      else {
+        quoteError.value = e.message;
+        await focusAction("quote");
+      }
+    } else {
+      quoteError.value = "A díjak lekérése nem sikerült.";
+      await focusAction("quote");
+    }
   } finally {
     quoteLoading.value = false;
   }
 }
 async function create() {
+  createError.value = "";
+  quoteError.value = "";
+  senderError.value = "";
   if (!selected.value || stale.value) {
-    validation.value = "Válassz egy aktuális szolgáltatást.";
+    quoteError.value = "Válassz egy aktuális szolgáltatást.";
+    await focusAction("quote");
     return;
   }
-  if (!valid()) return;
+  if (!(await validateAndFocus())) return;
   creating.value = true;
-  error.value = "";
   try {
     const docs = await Promise.all(
       documents.value.map(async (d) => ({
@@ -403,6 +510,9 @@ async function create() {
             exportDeclaration: {
               lineItems: items.value.map((i) => ({
                 ...i,
+                price: decimalNumber(i.price),
+                netWeight: decimalNumber(i.netWeight),
+                grossWeight: decimalNumber(i.grossWeight),
                 manufacturerCountry: country(i.manufacturerCountry),
               })),
               invoiceDate: invoiceDate.value,
@@ -417,10 +527,17 @@ async function create() {
       body: JSON.stringify(body),
     });
   } catch (e) {
-    error.value =
-      e instanceof ApiError
-        ? e.message
-        : "A küldemény létrehozása nem sikerült.";
+    if (e instanceof ApiError) {
+      const paths = mapBackendErrors(e);
+      if (paths.length) await focusField(paths[0]);
+      else {
+        createError.value = e.message;
+        await focusAction("create");
+      }
+    } else {
+      createError.value = "A küldemény létrehozása nem sikerült.";
+      await focusAction("create");
+    }
   } finally {
     creating.value = false;
   }
@@ -506,7 +623,7 @@ async function loadCopySource() {
     copiedProductCode.value = source.productCode || "";
     copyNotice.value = "Egy korábbi küldemény adatait másoltuk be. Ellenőrizd az adatokat, majd kérj új díjat.";
   } catch (e) {
-    error.value = e instanceof ApiError
+    quoteError.value = e instanceof ApiError
       ? `A másolandó küldemény nem tölthető be: ${e.message}`
       : "A másolandó küldemény nem tölthető be. Az új küldemény űrlapja továbbra is használható.";
   } finally {
@@ -561,11 +678,8 @@ onMounted(async () => {
       </div>
     </div>
     <p class="muted">* Kötelező mező</p>
-    <p v-if="error || validation" class="alert error">
-      {{ error || validation }}
-    </p>
     <p v-if="copyNotice" class="alert success-text">{{ copyNotice }}</p>
-    <section class="card">
+    <section ref="actionRef('sender')" class="card">
       <div class="section-head">
         <h2>1. Feladó</h2>
         <RouterLink class="button secondary" to="/company-profile">Feladói adatok szerkesztése</RouterLink>
@@ -574,6 +688,7 @@ onMounted(async () => {
       <p v-if="!loadingProfile && !senderProfileComplete" class="alert error">
         A küldemény létrehozásához előbb töltsd ki a Feladói adatok menüpontban a szükséges céges adatokat.
       </p>
+      <p v-else-if="senderError" class="alert error">{{ senderError }}</p>
       <div class="address-grid">
         <label>Cégnév *<input :value="sender.companyName" readonly /></label
         ><label
@@ -598,26 +713,26 @@ onMounted(async () => {
     <section class="card">
       <h2>2. Címzett</h2>
       <div class="address-grid">
-        <label>Cégnév *<input v-model.trim="recipient.companyName" /></label
+        <label>Cégnév *<input :ref="fieldRef('recipient.companyName')" :class="{ 'field-invalid': hasError('recipient.companyName') }" v-model.trim="recipient.companyName" /><small v-if="errorFor('recipient.companyName')" class="field-error">{{ errorFor('recipient.companyName') }}</small></label
         ><label
           >Kapcsolattartó neve *<input
-            v-model.trim="recipient.contactName" /></label
+            :ref="fieldRef('recipient.contactName')" :class="{ 'field-invalid': hasError('recipient.contactName') }" v-model.trim="recipient.contactName" /><small v-if="errorFor('recipient.contactName')" class="field-error">{{ errorFor('recipient.contactName') }}</small></label
         ><label
           >Országkód *<input
-            v-model="recipient.countryCode"
+            :ref="fieldRef('recipient.countryCode')" :class="{ 'field-invalid': hasError('recipient.countryCode') }" v-model="recipient.countryCode"
             maxlength="2"
             @input="recipient.countryCode = country(recipient.countryCode)"
-          /><small>2 betűs ISO országkód, pl. HU, DE, US</small></label
+          /><small>2 betűs ISO országkód, pl. HU, DE, US</small><small v-if="errorFor('recipient.countryCode')" class="field-error">{{ errorFor('recipient.countryCode') }}</small></label
         ><label
           >Állam / tartomány<input
-            v-model.trim="recipient.stateOrProvinceCode"
-            placeholder="pl. NC" /></label
-        ><label>Irányítószám *<input v-model.trim="recipient.postalCode" /></label
-        ><label>Város *<input v-model.trim="recipient.cityName" /></label
-        ><label>Cím *<input v-model.trim="recipient.addressLine1" /></label
+            :ref="fieldRef('recipient.stateOrProvinceCode')" :class="{ 'field-invalid': hasError('recipient.stateOrProvinceCode') }" v-model.trim="recipient.stateOrProvinceCode"
+            placeholder="pl. NC" /><small v-if="errorFor('recipient.stateOrProvinceCode')" class="field-error">{{ errorFor('recipient.stateOrProvinceCode') }}</small></label
+        ><label>Irányítószám *<input :ref="fieldRef('recipient.postalCode')" :class="{ 'field-invalid': hasError('recipient.postalCode') }" v-model.trim="recipient.postalCode" /><small v-if="errorFor('recipient.postalCode')" class="field-error">{{ errorFor('recipient.postalCode') }}</small></label
+        ><label>Város *<input :ref="fieldRef('recipient.cityName')" :class="{ 'field-invalid': hasError('recipient.cityName') }" v-model.trim="recipient.cityName" /><small v-if="errorFor('recipient.cityName')" class="field-error">{{ errorFor('recipient.cityName') }}</small></label
+        ><label>Cím *<input :ref="fieldRef('recipient.addressLine1')" :class="{ 'field-invalid': hasError('recipient.addressLine1') }" v-model.trim="recipient.addressLine1" /><small v-if="errorFor('recipient.addressLine1')" class="field-error">{{ errorFor('recipient.addressLine1') }}</small></label
         ><label>Cím 2<input v-model.trim="recipient.addressLine2" /></label
-        ><label>Telefonszám *<input v-model.trim="recipient.phone" /></label
-        ><label>E-mail<input v-model.trim="recipient.email" /></label>
+        ><label>Telefonszám *<input :ref="fieldRef('recipient.phone')" :class="{ 'field-invalid': hasError('recipient.phone') }" v-model.trim="recipient.phone" /><small v-if="errorFor('recipient.phone')" class="field-error">{{ errorFor('recipient.phone') }}</small></label
+        ><label>E-mail<input :ref="fieldRef('recipient.email')" :class="{ 'field-invalid': hasError('recipient.email') }" v-model.trim="recipient.email" /><small v-if="errorFor('recipient.email')" class="field-error">{{ errorFor('recipient.email') }}</small></label>
       </div>
     </section>
     <section class="card">
@@ -627,16 +742,15 @@ onMounted(async () => {
         <h3>Csomag {{ n + 1 }}</h3>
         <div class="package-grid">
           <label
-            >Súly (kg) *<input v-model.number="p.weight" type="number" /></label
+            >Csomag teljes súlya (kg) *<input :ref="fieldRef(`packages.${n}.weight`)" :class="{ 'field-invalid': hasError(`packages.${n}.weight`) }" :value="p.weight ?? ''" inputmode="decimal" @input="p.weight = decimalInput($event)" /><small>A csomag teljes súlya csomagolással együtt.</small><small v-if="errorFor(`packages.${n}.weight`)" class="field-error">{{ errorFor(`packages.${n}.weight`) }}</small></label
           ><label
-            >Hossz (cm) *<input v-model.number="p.length" type="number" /></label
+            >Hossz (cm) *<input :ref="fieldRef(`packages.${n}.length`)" :class="{ 'field-invalid': hasError(`packages.${n}.length`) }" :value="p.length ?? ''" inputmode="decimal" @input="p.length = decimalInput($event)" /><small v-if="errorFor(`packages.${n}.length`)" class="field-error">{{ errorFor(`packages.${n}.length`) }}</small></label
           ><label
-            >Szélesség (cm) *<input
-              v-model.number="p.width"
-              type="number" /></label
+            >Szélesség (cm) *<input :ref="fieldRef(`packages.${n}.width`)" :class="{ 'field-invalid': hasError(`packages.${n}.width`) }"
+              :value="p.width ?? ''" inputmode="decimal" @input="p.width = decimalInput($event)" /><small v-if="errorFor(`packages.${n}.width`)" class="field-error">{{ errorFor(`packages.${n}.width`) }}</small></label
           ><label
-            >Magasság (cm) *<input v-model.number="p.height" type="number"
-          /></label>
+            >Magasság (cm) *<input :ref="fieldRef(`packages.${n}.height`)" :class="{ 'field-invalid': hasError(`packages.${n}.height`) }" :value="p.height ?? ''" inputmode="decimal" @input="p.height = decimalInput($event)"
+          /><small v-if="errorFor(`packages.${n}.height`)" class="field-error">{{ errorFor(`packages.${n}.height`) }}</small></label>
         </div>
         <button
           v-if="packages.length > 1"
@@ -675,20 +789,20 @@ onMounted(async () => {
       <template v-if="effectiveCustomsDeclarable"
         ><div class="address-grid">
           <label
-            >Pénznem *<input
+            >Pénznem *<input :ref="fieldRef('customs.currency')" :class="{ 'field-invalid': hasError('customs.currency') }"
               v-model="currency"
               maxlength="3"
-              @input="currency = currency.toUpperCase()" /></label
+              @input="currency = currency.toUpperCase()" /><small v-if="errorFor('customs.currency')" class="field-error">{{ errorFor('customs.currency') }}</small></label
           ><label
-            >Számla dátuma *<input v-model="invoiceDate" type="date" /></label
+            >Számla dátuma *<input :ref="fieldRef('customs.invoiceDate')" :class="{ 'field-invalid': hasError('customs.invoiceDate') }" v-model="invoiceDate" type="date" /><small v-if="errorFor('customs.invoiceDate')" class="field-error">{{ errorFor('customs.invoiceDate') }}</small></label
           ><label
-            >Incoterm *<select v-model="incoterm">
+            >Incoterm *<select :ref="fieldRef('customs.incoterm')" :class="{ 'field-invalid': hasError('customs.incoterm') }" v-model="incoterm">
               <option>DAP</option>
               <option>DDP</option>
               <option>EXW</option>
               <option>FCA</option>
-            </select></label
-          ><label>Küldemény leírása *<input v-model.trim="description" /></label>
+            </select><small v-if="errorFor('customs.incoterm')" class="field-error">{{ errorFor('customs.incoterm') }}</small></label
+          ><label>Küldemény leírása *<input :ref="fieldRef('customs.description')" :class="{ 'field-invalid': hasError('customs.description') }" v-model.trim="description" /><small v-if="errorFor('customs.description')" class="field-error">{{ errorFor('customs.description') }}</small></label>
         </div>
         <p>
           <b>Bejelentett összérték: {{ money(declared, currency) }}</b>
@@ -696,32 +810,32 @@ onMounted(async () => {
         <article v-for="(i, n) in items" :key="i.number" class="customs-item">
           <h3>Vámtétel {{ n + 1 }}</h3>
           <div class="customs-grid">
-            <label>Megnevezés *<input v-model="i.description" /></label
+            <label>Megnevezés *<input :ref="fieldRef(`exportDeclaration.lineItems.${n}.description`)" :class="{ 'field-invalid': hasError(`exportDeclaration.lineItems.${n}.description`) }" v-model="i.description" /><small v-if="errorFor(`exportDeclaration.lineItems.${n}.description`)" class="field-error">{{ errorFor(`exportDeclaration.lineItems.${n}.description`) }}</small></label
             ><label
               >Mennyiség *<input
-                v-model.number="i.quantity"
-                type="number" /></label
+              :ref="fieldRef(`exportDeclaration.lineItems.${n}.quantity`)" :class="{ 'field-invalid': hasError(`exportDeclaration.lineItems.${n}.quantity`) }" v-model.number="i.quantity"
+              type="number" /><small v-if="errorFor(`exportDeclaration.lineItems.${n}.quantity`)" class="field-error">{{ errorFor(`exportDeclaration.lineItems.${n}.quantity`) }}</small></label
             ><label
-              >Egységár *<input v-model.number="i.price" type="number" /></label
+              >Egységár *<input :ref="fieldRef(`exportDeclaration.lineItems.${n}.price`)" :class="{ 'field-invalid': hasError(`exportDeclaration.lineItems.${n}.price`) }" :value="i.price ?? ''" inputmode="decimal" @input="i.price = decimalInput($event)" /><small v-if="errorFor(`exportDeclaration.lineItems.${n}.price`)" class="field-error">{{ errorFor(`exportDeclaration.lineItems.${n}.price`) }}</small></label
             ><label
               >Származási ország *<input
-                v-model="i.manufacturerCountry"
+              :ref="fieldRef(`exportDeclaration.lineItems.${n}.manufacturerCountry`)" :class="{ 'field-invalid': hasError(`exportDeclaration.lineItems.${n}.manufacturerCountry`) }" v-model="i.manufacturerCountry"
                 maxlength="2"
                 @input="
                   i.manufacturerCountry = country(i.manufacturerCountry)
-                " /></label
+                " /><small v-if="errorFor(`exportDeclaration.lineItems.${n}.manufacturerCountry`)" class="field-error">{{ errorFor(`exportDeclaration.lineItems.${n}.manufacturerCountry`) }}</small></label
             ><label
-              >Export oka *<select v-model="i.exportReasonType">
+              >Export oka *<select :ref="fieldRef(`exportDeclaration.lineItems.${n}.exportReasonType`)" :class="{ 'field-invalid': hasError(`exportDeclaration.lineItems.${n}.exportReasonType`) }" v-model="i.exportReasonType">
                 <option v-for="r in reasons" :value="r[0]">{{ r[1] }}</option>
-              </select></label
+              </select><small v-if="errorFor(`exportDeclaration.lineItems.${n}.exportReasonType`)" class="field-error">{{ errorFor(`exportDeclaration.lineItems.${n}.exportReasonType`) }}</small></label
             ><label>HS-kód<input v-model="i.commodityCode" /></label
             ><label
-              >Nettó tömeg (nettó vagy bruttó kötelező) *<input
-                v-model.number="i.netWeight"
-                type="number" /></label
+              >Tétel nettó tömege (kg) *<input
+              :ref="fieldRef(`exportDeclaration.lineItems.${n}.netWeight`)" :class="{ 'field-invalid': hasError(`exportDeclaration.lineItems.${n}.netWeight`) }" :value="i.netWeight ?? ''" inputmode="decimal" @input="i.netWeight = decimalInput($event)"
+              /><small>Nettó: az áru tömege csomagolás nélkül.</small><small v-if="errorFor(`exportDeclaration.lineItems.${n}.netWeight`)" class="field-error">{{ errorFor(`exportDeclaration.lineItems.${n}.netWeight`) }}</small></label
             ><label
-              >Bruttó tömeg (nettó vagy bruttó kötelező) *<input v-model.number="i.grossWeight" type="number"
-            /></label>
+              >Tétel bruttó tömege (kg) *<input :ref="fieldRef(`exportDeclaration.lineItems.${n}.grossWeight`)" :class="{ 'field-invalid': hasError(`exportDeclaration.lineItems.${n}.grossWeight`) }" :value="i.grossWeight ?? ''" inputmode="decimal" @input="i.grossWeight = decimalInput($event)"
+            /><small>Bruttó: az áru vámáru-nyilatkozathoz használt teljes tömege.</small><small v-if="errorFor(`exportDeclaration.lineItems.${n}.grossWeight`)" class="field-error">{{ errorFor(`exportDeclaration.lineItems.${n}.grossWeight`) }}</small></label>
           </div>
         </article>
         <section class="upload-zone" @dragover.prevent @drop="drop">
@@ -755,8 +869,9 @@ onMounted(async () => {
         </section></template
       >
     </section>
-    <section class="card">
+    <section ref="actionRef('quote')" class="card">
       <h2>5. Szállítási szolgáltatás</h2>
+      <p v-if="quoteError" class="alert error action-error">{{ quoteError }}</p>
       <p v-if="stale" class="alert error">
         A küldemény adatai megváltoztak. Kérj új szállítási díjakat.
       </p>
@@ -774,7 +889,7 @@ onMounted(async () => {
         ></label
       >
     </section>
-    <section v-if="selected && !stale" class="card review">
+    <section v-if="selected && !stale" ref="actionRef('create')" class="card review">
       <h2>6. Ellenőrzés és létrehozás</h2>
       <p>
         Feladó: {{ sender.companyName }}, {{ sender.cityName }}
@@ -800,6 +915,7 @@ onMounted(async () => {
       <button :disabled="creating || !senderProfileComplete" @click="create">
         {{ creating ? "Küldemény létrehozása…" : "Küldemény létrehozása" }}
       </button>
+      <p v-if="createError" class="alert error action-error">{{ createError }}</p>
     </section>
   </section>
 </template>

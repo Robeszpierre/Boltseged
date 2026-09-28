@@ -1,7 +1,7 @@
 import { forceLogout, refreshAccessToken, token } from './auth'
 
 export class ApiError extends Error {
-  constructor(message: string, public status?: number) {
+  constructor(message: string, public status?: number, public details: string[] = []) {
     super(message)
   }
 }
@@ -22,10 +22,16 @@ async function unauthenticated(response: Response) {
   }
 }
 
-async function message(response: Response) {
+async function apiError(response: Response) {
   let body: any = {}
   try { body = await response.json() } catch {}
-  return Array.isArray(body.details) && body.details.length ? body.details.join('\n') : body.message || 'A kérés nem sikerült.'
+  const details = Array.isArray(body.details) ? body.details.filter((item: unknown): item is string => typeof item === 'string') : []
+  const message = body.failureReason
+    ? `${body.message || 'A küldemény létrehozása sikertelen volt.'}\n${body.failureReason}`
+    : details.length
+      ? `${body.message || 'A kérés nem sikerült.'}\n${details.join('\n')}`
+      : body.message || 'A kérés nem sikerült.'
+  return new ApiError(message, response.status, details)
 }
 
 async function request(path: string, init: RequestInit = {}, retried = false): Promise<Response> {
@@ -40,7 +46,7 @@ async function request(path: string, init: RequestInit = {}, retried = false): P
     forceLogout()
     throw new ApiError('A munkamenet lejárt. Jelentkezz be újra.', 401)
   }
-  if (!response.ok) throw new ApiError(await message(response), response.status)
+  if (!response.ok) throw await apiError(response)
   return response
 }
 
