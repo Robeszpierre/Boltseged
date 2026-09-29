@@ -41,7 +41,8 @@ public class ShipmentService {
 
   public List<ShipmentController.CustomerQuote> quote(Account account, ShipmentController.QuoteRequest request) {
     ShippingProvider.Address sender = sender(account);
-    return dhl.quote(toQuote(sender, address(request.recipient()), request.plannedShippingDateAndTime(), request.customsDeclarable(), request.packages())).stream()
+    validateIncoterm(request.customsDeclarable(), request.incoterm());
+    return dhl.quote(toQuote(sender, address(request.recipient()), request.plannedShippingDateAndTime(), request.customsDeclarable(), request.incoterm(), request.packages())).stream()
         .map(q -> new ShipmentController.CustomerQuote(q.productCode(), q.productName(), PricingCalculator.customerPrice(account, q.estimatedCost()), q.currency(), q.estimatedDelivery()))
         .toList();
   }
@@ -51,10 +52,11 @@ public class ShipmentService {
     if (old != null) return old;
     validateRecipient(request.recipient());
     validateDescription(request);
+    validateIncoterm(request.customsDeclarable(), request.incoterm());
     validateCustomsWeights(request);
     ShippingProvider.Address sender = sender(account);
     ShippingProvider.Address recipient = address(request.recipient());
-    ShippingProvider.Quote selected = dhl.quote(toQuote(sender, recipient, request.plannedShippingDateAndTime(), request.customsDeclarable(), request.packages())).stream()
+    ShippingProvider.Quote selected = dhl.quote(toQuote(sender, recipient, request.plannedShippingDateAndTime(), request.customsDeclarable(), request.incoterm(), request.packages())).stream()
         .filter(q -> q.productCode().equals(request.productCode()))
         .findFirst()
         .orElseThrow(() -> new DhlApiException(HttpStatus.BAD_REQUEST, List.of("The selected DHL product is no longer available")));
@@ -139,6 +141,12 @@ public class ShipmentService {
     }
   }
 
+  private void validateIncoterm(boolean customsDeclarable, String incoterm) {
+    if (customsDeclarable && blank(incoterm)) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Válassz Incotermet.");
+    }
+  }
+
   private String dhlFailureReason(DhlApiException error) {
     String details = String.join(" ", error.messages()).replaceAll("[\\r\\n]+", " ").trim();
     if (details.isBlank()) return "A DHL nem tudta feldolgozni a küldeményt. Ellenőrizd az adatokat és próbáld újra.";
@@ -196,8 +204,8 @@ public class ShipmentService {
   }
 
   private ShippingProvider.QuoteRequest toQuote(ShippingProvider.Address sender, ShippingProvider.Address recipient,
-      java.time.LocalDateTime planned, boolean customsDeclarable, List<ShipmentController.PackageRequest> packages) {
-    return new ShippingProvider.QuoteRequest(sender, recipient, planned, customsDeclarable, packages(packages));
+      java.time.LocalDateTime planned, boolean customsDeclarable, String incoterm, List<ShipmentController.PackageRequest> packages) {
+    return new ShippingProvider.QuoteRequest(sender, recipient, planned, customsDeclarable, incoterm, packages(packages));
   }
 
   private ShippingProvider.CreateRequest toCreate(ShippingProvider.Address sender, ShippingProvider.Address recipient, ShipmentController.CreateRequest request, String key) {

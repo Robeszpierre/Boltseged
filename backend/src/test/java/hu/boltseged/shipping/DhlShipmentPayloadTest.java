@@ -68,6 +68,26 @@ class DhlShipmentPayloadTest {
     assertTrue(description.length() <= 70);
   }
 
+  @Test
+  void addsDutiesTaxesAccountAndDdServiceOnlyForDdpCustomsShipments() {
+    JsonNode ddp = provider.shipmentPayload(customsRequest("DDP", List.of()));
+    JsonNode dap = provider.shipmentPayload(customsRequest("DAP", List.of()));
+
+    assertEquals("DDP", ddp.path("content").path("incoterm").asText());
+    assertEquals(2, ddp.path("accounts").size());
+    assertEquals("shipper", ddp.path("accounts").get(0).path("typeCode").asText());
+    assertEquals("123456789", ddp.path("accounts").get(0).path("number").asText());
+    assertEquals("duties-taxes", ddp.path("accounts").get(1).path("typeCode").asText());
+    assertEquals("123456789", ddp.path("accounts").get(1).path("number").asText());
+    assertEquals("DD", ddp.path("valueAddedServices").get(0).path("serviceCode").asText());
+    assertEquals("WY", ddp.path("valueAddedServices").get(1).path("serviceCode").asText());
+    assertEquals(2, ddp.path("valueAddedServices").size());
+    assertEquals(1, dap.path("accounts").size());
+    assertEquals(1, dap.path("valueAddedServices").size());
+    assertEquals("WY", dap.path("valueAddedServices").get(0).path("serviceCode").asText());
+    assertFalse(ddp.toString().contains("GGP"));
+  }
+
   private DhlExpressShippingProvider provider() {
     DhlExpressShippingProvider.DhlProperties properties = new DhlExpressShippingProvider.DhlProperties();
     properties.setApiBaseUrl("http://localhost");
@@ -78,7 +98,11 @@ class DhlShipmentPayloadTest {
   }
 
   private ShippingProvider.CreateRequest customsRequest(List<ShippingProvider.CustomsDocument> documents) {
-    return new ShippingProvider.CreateRequest("P", address(), address(), LocalDateTime.of(2026, 9, 21, 10, 0), true, "Wooden gift", new BigDecimal("50"), "USD", "DAP", declaration(), List.of(parcel()), documents);
+    return customsRequest("DAP", documents);
+  }
+
+  private ShippingProvider.CreateRequest customsRequest(String incoterm, List<ShippingProvider.CustomsDocument> documents) {
+    return new ShippingProvider.CreateRequest("P", address(), address(), LocalDateTime.of(2026, 9, 21, 10, 0), true, "Wooden gift", new BigDecimal("50"), "USD", incoterm, declaration(), List.of(parcel()), documents);
   }
 
   private ShippingProvider.CreateRequest nonCustomsRequest() {

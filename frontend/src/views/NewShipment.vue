@@ -177,7 +177,7 @@ const min = next(),
   customsOverride = ref<boolean | null>(null),
   items = ref<I[]>([isDevelopment ? { ...DEV_CUSTOMS_ITEM } : blankI(1)]),
   currency = ref(isDevelopment ? "USD" : ""),
-  incoterm = ref("DAP"),
+  incoterm = ref(""),
   description = ref(""),
   documents = ref<D[]>([]),
   profile = ref<any>({}),
@@ -409,6 +409,7 @@ const base = () => ({
   },
   plannedShippingDateAndTime: `${pickupDate.value}T10:00:00`,
   customsDeclarable: effectiveCustomsDeclarable.value,
+  ...(effectiveCustomsDeclarable.value ? { incoterm: incoterm.value } : {}),
   packages: packages.value.map((item) => ({
     weight: decimalNumber(item.weight),
     length: decimalNumber(item.length),
@@ -616,7 +617,7 @@ async function loadCopySource() {
     customsOverride.value = source.customs?.customsDeclarable ?? null;
     description.value = source.customs?.description || "";
     currency.value = source.customs?.declaredValueCurrency || "";
-    incoterm.value = source.customs?.incoterm || "DAP";
+    incoterm.value = source.customs?.incoterm || "";
     items.value = source.customs?.lineItems?.length
       ? source.customs.lineItems.map((item, index) => ({
           number: index + 1,
@@ -812,8 +813,9 @@ onMounted(async () => {
             >Számla dátuma *<input :ref="fieldRef('customs.invoiceDate')" :class="{ 'field-invalid': hasError('customs.invoiceDate') }" v-model="invoiceDate" type="date" /><small v-if="errorFor('customs.invoiceDate')" class="field-error">{{ errorFor('customs.invoiceDate') }}</small></label
           ><label
             >Incoterm *<select :ref="fieldRef('customs.incoterm')" :class="{ 'field-invalid': hasError('customs.incoterm') }" v-model="incoterm">
-              <option>DAP</option>
-              <option>DDP</option>
+              <option disabled value="">Válassz Incotermet…</option>
+              <option value="DAP">DAP – a címzett fizeti az import vámokat és adókat</option>
+              <option value="DDP">DDP – a feladó fizeti a vámokat és adókat</option>
               <option>EXW</option>
               <option>FCA</option>
             </select><small v-if="errorFor('customs.incoterm')" class="field-error">{{ errorFor('customs.incoterm') }}</small></label

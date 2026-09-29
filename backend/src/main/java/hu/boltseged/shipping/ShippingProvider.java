@@ -5,7 +5,7 @@ public interface ShippingProvider {
   List<Quote> quote(QuoteRequest request); Result create(CreateRequest request); PickupResult createPickup(PickupRequest request); void cancelPickup(String dispatchConfirmationNumber,String requestorName,String reason);
   record Address(String companyName,String contactName,String countryCode,String postalCode,String cityName,String addressLine1,String addressLine2,String stateOrProvinceCode,String phone,String email){}
   record Package(BigDecimal weight,BigDecimal length,BigDecimal width,BigDecimal height){}
-  record QuoteRequest(Address shipper,Address receiver,LocalDateTime plannedShippingDateAndTime,boolean customsDeclarable,List<Package> packages){}
+  record QuoteRequest(Address shipper,Address receiver,LocalDateTime plannedShippingDateAndTime,boolean customsDeclarable,String incoterm,List<Package> packages){}
   record Quote(String productCode,String productName,BigDecimal estimatedCost,String currency,String estimatedDelivery){}
   record ExportLineItem(int number,String description,BigDecimal price,int quantity,String quantityUnitOfMeasurement,String manufacturerCountry,BigDecimal netWeight,BigDecimal grossWeight,String exportReasonType,String commodityCode){}
   record ExportDeclaration(List<ExportLineItem> lineItems,String invoiceNumber,java.time.LocalDate invoiceDate){}
