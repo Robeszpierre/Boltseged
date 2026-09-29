@@ -50,6 +50,7 @@ public class ShipmentService {
     Shipment old = shipments.findByAccountIdAndIdempotencyKey(account.getId(), key).orElse(null);
     if (old != null) return old;
     validateRecipient(request.recipient());
+    validateDescription(request);
     validateCustomsWeights(request);
     ShippingProvider.Address sender = sender(account);
     ShippingProvider.Address recipient = address(request.recipient());
@@ -129,6 +130,12 @@ public class ShipmentService {
     BigDecimal packageWeight = request.packages().stream().map(ShipmentController.PackageRequest::weight).filter(Objects::nonNull).reduce(BigDecimal.ZERO, BigDecimal::add);
     if (customsGross.compareTo(packageWeight) > 0) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A vámáruk összes bruttó tömege nem lehet nagyobb a csomagok teljes súlyánál.");
+    }
+  }
+
+  private void validateDescription(ShipmentController.CreateRequest request) {
+    if (request.customsDeclarable() && request.description() != null && request.description().length() > 70) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A küldemény tartalmának leírása legfeljebb 70 karakter lehet.");
     }
   }
 

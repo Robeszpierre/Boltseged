@@ -56,6 +56,18 @@ class DhlShipmentPayloadTest {
     assertEquals("CA", postalAddress.path("provinceCode").asText());
   }
 
+  @Test
+  void mapsTheSuppliedDescriptionVerbatim() {
+    String description = "Personalised engraved items made on finished wood";
+
+    JsonNode content = provider.shipmentPayload(new ShippingProvider.CreateRequest("P", address(), address(),
+        LocalDateTime.of(2026, 9, 21, 10, 0), true, description, new BigDecimal("50"), "USD", "DAP", declaration(), List.of(parcel()), List.of()))
+        .path("content");
+
+    assertEquals(description, content.path("description").asText());
+    assertTrue(description.length() <= 70);
+  }
+
   private DhlExpressShippingProvider provider() {
     DhlExpressShippingProvider.DhlProperties properties = new DhlExpressShippingProvider.DhlProperties();
     properties.setApiBaseUrl("http://localhost");

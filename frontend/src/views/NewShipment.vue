@@ -199,7 +199,18 @@ const route = useRoute(),
   copyLoading = ref(false),
   copyNotice = ref(""),
   copiedProductCode = ref("");
-let key = crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+let idempotencyKey: string | undefined;
+function newIdempotencyKey() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+function attemptKey() {
+  return idempotencyKey ??= newIdempotencyKey();
+}
 const fieldElements = new Map<string, HTMLElement>();
 const actionElements = new Map<string, HTMLElement>();
 const fieldRef = (path: string) => (element: unknown) => {
@@ -338,6 +349,7 @@ function validateFields() {
     if (!invoiceDate.value) addError("customs.invoiceDate", "Add meg a számla dátumát.");
     if (!incoterm.value) addError("customs.incoterm", "Válassz Incotermet.");
     if (!description.value) addError("customs.description", "Add meg a küldemény leírását.");
+    else if (description.value.length > 70) addError("customs.description", "A küldemény tartalmának leírása legfeljebb 70 karakter lehet.");
     items.value.forEach((item, index) => {
       const path = `exportDeclaration.lineItems.${index}`;
       if (!item.description) addError(`${path}.description`, "Add meg a vámtétel megnevezését.");
@@ -475,6 +487,7 @@ async function quote() {
   }
 }
 async function create() {
+  if (creating.value) return;
   createError.value = "";
   quoteError.value = "";
   senderError.value = "";
@@ -485,6 +498,7 @@ async function create() {
   }
   if (!(await validateAndFocus())) return;
   creating.value = true;
+  const key = attemptKey();
   try {
     const docs = await Promise.all(
       documents.value.map(async (d) => ({
@@ -528,6 +542,7 @@ async function create() {
     });
   } catch (e) {
     if (e instanceof ApiError) {
+      idempotencyKey = undefined;
       const paths = mapBackendErrors(e);
       if (paths.length) await focusField(paths[0]);
       else {
@@ -802,7 +817,7 @@ onMounted(async () => {
               <option>EXW</option>
               <option>FCA</option>
             </select><small v-if="errorFor('customs.incoterm')" class="field-error">{{ errorFor('customs.incoterm') }}</small></label
-          ><label>Küldemény leírása *<input :ref="fieldRef('customs.description')" :class="{ 'field-invalid': hasError('customs.description') }" v-model.trim="description" /><small v-if="errorFor('customs.description')" class="field-error">{{ errorFor('customs.description') }}</small></label>
+          ><label>Küldemény leírása *<input :ref="fieldRef('customs.description')" :class="{ 'field-invalid': hasError('customs.description') }" v-model.trim="description" maxlength="70" /><small>{{ description.length }} / 70</small><small v-if="errorFor('customs.description')" class="field-error">{{ errorFor('customs.description') }}</small></label>
         </div>
         <p>
           <b>Bejelentett összérték: {{ money(declared, currency) }}</b>
