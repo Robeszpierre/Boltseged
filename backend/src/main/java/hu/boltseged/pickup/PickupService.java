@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.*;
 import hu.boltseged.account.Account;
 import hu.boltseged.shipment.*;
 import hu.boltseged.shipping.ShippingProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,7 +17,7 @@ import java.util.*;
 @Service public class PickupService {
   private static final ZoneId BUSINESS_ZONE=ZoneId.of("Europe/Budapest");
   private final PickupBookingRepository bookings; private final ShipmentRepository shipments; private final ShippingProvider dhl; private final ObjectMapper json; private final Clock clock;
-  public PickupService(PickupBookingRepository b,ShipmentRepository s,ShippingProvider d,ObjectMapper j){this(b,s,d,j,Clock.system(BUSINESS_ZONE));}
+  @Autowired public PickupService(PickupBookingRepository b,ShipmentRepository s,ShippingProvider d,ObjectMapper j){this(b,s,d,j,Clock.system(BUSINESS_ZONE));}
   PickupService(PickupBookingRepository b,ShipmentRepository s,ShippingProvider d,ObjectMapper j,Clock c){bookings=b;shipments=s;dhl=d;json=j;clock=c;}
   @Transactional public PickupBooking create(Account account,PickupController.CreateRequest request){
     validatePickupDateAndTime(request);
