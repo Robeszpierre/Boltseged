@@ -10,12 +10,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import java.math.BigDecimal;
+import java.time.*;
 import java.util.*;
 
 @Service public class PickupService {
-  private final PickupBookingRepository bookings; private final ShipmentRepository shipments; private final ShippingProvider dhl; private final ObjectMapper json;
-  public PickupService(PickupBookingRepository b,ShipmentRepository s,ShippingProvider d,ObjectMapper j){bookings=b;shipments=s;dhl=d;json=j;}
+  private static final ZoneId BUSINESS_ZONE=ZoneId.of("Europe/Budapest");
+  private final PickupBookingRepository bookings; private final ShipmentRepository shipments; private final ShippingProvider dhl; private final ObjectMapper json; private final Clock clock;
+  public PickupService(PickupBookingRepository b,ShipmentRepository s,ShippingProvider d,ObjectMapper j){this(b,s,d,j,Clock.system(BUSINESS_ZONE));}
+  PickupService(PickupBookingRepository b,ShipmentRepository s,ShippingProvider d,ObjectMapper j,Clock c){bookings=b;shipments=s;dhl=d;json=j;clock=c;}
   @Transactional public PickupBooking create(Account account,PickupController.CreateRequest request){
+    validatePickupDateAndTime(request);
     ShippingProvider.Address pickup=pickupAddress(account);
     List<UUID> unique=request.shipmentIds().stream().distinct().toList();
     List<Shipment> selected=shipments.findAllForPickupByIdIn(unique);
@@ -31,6 +35,7 @@ import java.util.*;
     return bookings.save(booking);
   }
   public List<PickupBooking> list(Account account){return bookings.findByAccountIdOrderByCreatedAtDesc(account.getId());}
+  private void validatePickupDateAndTime(PickupController.CreateRequest request){LocalDate today=LocalDate.now(clock);if(request.pickupDate().isBefore(today))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"A futárfelvétel dátuma nem lehet korábbi a mai napnál.");if(request.pickupDate().equals(today)&&!request.closeTime().isAfter(LocalTime.now(clock)))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"A mai futárfelvételhez jövőbeli időpontot válassz.");}
   @Transactional public PickupBooking cancel(Account account,UUID id){PickupBooking booking=bookings.findByIdAndAccountId(id,account.getId()).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND));if("CANCELLED".equals(booking.getStatus()))return booking;List<String> confirmations=readStrings(booking.getDispatchConfirmationNumbers());if(confirmations.isEmpty())throw new IllegalStateException("Pickup confirmation is missing");String requestor=account.getContactName()==null||account.getContactName().isBlank()?account.getEmail():account.getContactName();for(String confirmation:confirmations)dhl.cancelPickup(confirmation,requestor,"Customer cancelled pickup");booking.cancel();return bookings.save(booking);}
   private ShippingProvider.PickupShipment pickupShipment(Shipment shipment){CustomsSnapshot customs=customs(shipment);if(customs.declarable()&&(customs.declaredValue()==null||customs.declaredValue().signum()<=0||customs.declaredValueCurrency()==null||!customs.declaredValueCurrency().matches("[A-Z]{3}")))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"A kiválasztott vámköteles küldeményhez nem áll rendelkezésre a szükséges vámérték vagy pénznem: "+shipment.getMasterTrackingNumber());return new ShippingProvider.PickupShipment(shipment.getDhlProductCode(),customs.declarable(),shipment.getMasterTrackingNumber(),customs.declaredValue(),customs.declaredValueCurrency(),shipment.getPackages().stream().map(p->new ShippingProvider.Package(p.getWeight(),p.getLength(),p.getWidth(),p.getHeight())).toList());}
   private CustomsSnapshot customs(Shipment shipment){try{JsonNode node=json.readTree(shipment.getCustoms());if(node.has("customsDeclarable"))return new CustomsSnapshot(node.path("customsDeclarable").asBoolean(),node.path("declaredValue").isNumber()?node.path("declaredValue").decimalValue():null,node.path("declaredValueCurrency").asText(null));}catch(Exception ignored){}Map<String,Object> from=readAddress(shipment.getSender()),to=readAddress(shipment.getRecipient());String a=String.valueOf(from.getOrDefault("countryCode","")),b=String.valueOf(to.getOrDefault("countryCode",""));Set<String> eu=Set.of("AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR","HU","IE","IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE");return new CustomsSnapshot(!a.equals(b)&&!(eu.contains(a)&&eu.contains(b)),null,null);}
