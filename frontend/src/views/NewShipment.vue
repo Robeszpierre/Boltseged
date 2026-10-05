@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
-import { api, apiBlob, ApiError } from "../api";
+import { api, apiBlob, ApiError, downloadBlob } from "../api";
 import { money, dateTime, productLabel, statusLabel } from "../customer";
 import "./new-shipment.css";
 type A = {
@@ -194,6 +194,7 @@ const min = next(),
   stale = ref(false),
   created = ref<any>(),
   downloading = ref(""),
+  downloadError = ref(""),
   copied = ref("");
 const route = useRoute(),
   copyLoading = ref(false),
@@ -306,6 +307,22 @@ function decimalInput(event: Event) {
   }).join("");
   return input.value;
 }
+function reindexItems() {
+  items.value.forEach((item, index) => {
+    item.number = index + 1;
+  });
+}
+function addCustomsItem() {
+  items.value.push(blankI(items.value.length + 1));
+  if (validationStarted.value) validateFields();
+}
+function removeCustomsItem(index: number) {
+  if (index === 0) return;
+  items.value.splice(index, 1);
+  reindexItems();
+  fieldErrors.value = {};
+  if (validationStarted.value) validateFields();
+}
 const country = (v: string) => v.trim().toUpperCase();
 const validCountry = (v: string) => ISO2.has(country(v));
 function addError(path: string, message: string) {
@@ -366,6 +383,8 @@ function validateFields() {
       else if (!(grossWeight && grossWeight > 0)) addError(`${path}.grossWeight`, "A bruttó tömegnek 0-nál nagyobbnak kell lennie.");
       else if (netWeight && grossWeight < netWeight) addError(`${path}.grossWeight`, "A bruttó tömeg nem lehet kisebb a nettó tömegnél.");
     });
+    const customsGrossWeight = items.value.reduce((sum, item) => sum + (decimalNumber(item.grossWeight) || 0), 0);
+    if (customsGrossWeight > total.value) addError("customs.grossWeight", "A vámáruk összes bruttó tömege nem lehet nagyobb a csomagok teljes súlyánál.");
   }
   return Object.keys(fieldErrors.value);
 }
@@ -393,6 +412,7 @@ function mapBackendErrors(error: ApiError) {
     if (lineItem && lineFields[lineItem[2]]) addError(`exportDeclaration.lineItems.${lineItem[1]}.${lineFields[lineItem[2]]}`, message);
     else if (parcel && ["weight", "length", "width", "height"].includes(parcel[2])) addError(`packages.${parcel[1]}.${parcel[2]}`, message);
     else if (value.includes("declaredvaluecurrency") || value.includes("currency")) addError("customs.currency", message);
+    else if (value.includes("vámáruk összes bruttó") || value.includes("customs gross")) addError("customs.grossWeight", message);
     else if (value.includes("incoterm")) addError("customs.incoterm", message);
     else if (value.includes("államkód") || value.includes("stateorprovince")) addError("recipient.stateOrProvinceCode", message);
     else if (value.includes("irányítószám") || value.includes("postal")) addError("recipient.postalCode", message);
@@ -401,6 +421,16 @@ function mapBackendErrors(error: ApiError) {
   }
   return Object.keys(fieldErrors.value);
 }
+const currentExportDeclaration = () => ({
+  lineItems: items.value.map((i) => ({
+    ...i,
+    price: decimalNumber(i.price),
+    netWeight: decimalNumber(i.netWeight),
+    grossWeight: decimalNumber(i.grossWeight),
+    manufacturerCountry: country(i.manufacturerCountry),
+  })),
+  invoiceDate: invoiceDate.value,
+});
 const base = () => ({
   sender: { ...sender.value, countryCode: country(sender.value.countryCode) },
   recipient: {
@@ -409,7 +439,10 @@ const base = () => ({
   },
   plannedShippingDateAndTime: `${pickupDate.value}T10:00:00`,
   customsDeclarable: effectiveCustomsDeclarable.value,
-  ...(effectiveCustomsDeclarable.value ? { incoterm: incoterm.value } : {}),
+  ...(effectiveCustomsDeclarable.value ? {
+    incoterm: incoterm.value,
+    exportDeclaration: currentExportDeclaration(),
+  } : {}),
   packages: packages.value.map((item) => ({
     weight: decimalNumber(item.weight),
     length: decimalNumber(item.length),
@@ -522,16 +555,7 @@ async function create() {
             declaredValue: declared.value,
             declaredValueCurrency: currency.value.toUpperCase(),
             incoterm: incoterm.value,
-            exportDeclaration: {
-              lineItems: items.value.map((i) => ({
-                ...i,
-                price: decimalNumber(i.price),
-                netWeight: decimalNumber(i.netWeight),
-                grossWeight: decimalNumber(i.grossWeight),
-                manufacturerCountry: country(i.manufacturerCountry),
-              })),
-              invoiceDate: invoiceDate.value,
-            },
+            exportDeclaration: currentExportDeclaration(),
             customsDocuments: docs,
           }
         : {}),
@@ -574,16 +598,15 @@ function useProfile() {
 }
 async function download(x: any) {
   downloading.value = x.id;
+  downloadError.value = "";
   try {
-    const b = await apiBlob(
-        `/api/shipments/${created.value.id}/labels/${x.id}`,
-      ),
-      u = URL.createObjectURL(b),
-      a = document.createElement("a");
-    a.href = u;
-    a.download = x.fileName;
-    a.click();
-    URL.revokeObjectURL(u);
+    downloadBlob(
+      await apiBlob(`/api/shipments/${created.value.id}/labels/${x.id}`),
+      x.fileName,
+    );
+  } catch (e) {
+    downloadError.value =
+      e instanceof ApiError ? e.message : "A dokumentum letöltése nem sikerült.";
   } finally {
     downloading.value = "";
   }
@@ -673,6 +696,7 @@ onMounted(async () => {
     <p v-for="p in created.packages" :key="p.packageIndex">
       Csomag {{ p.packageIndex }}: {{ p.trackingNumber }}
     </p>
+    <p v-if="downloadError" class="alert error">{{ downloadError }}</p>
     <div v-for="d in created.labels" :key="d.id" class="document">
       <span>{{ d.fileName }}</span
       ><button :disabled="downloading === d.id" @click="download(d)">
@@ -825,7 +849,10 @@ onMounted(async () => {
           <b>Bejelentett összérték: {{ money(declared, currency) }}</b>
         </p>
         <article v-for="(i, n) in items" :key="i.number" class="customs-item">
-          <h3>Vámtétel {{ n + 1 }}</h3>
+          <div class="customs-item-head">
+            <h3>Vámtétel {{ n + 1 }}</h3>
+            <button v-if="n > 0" class="secondary" type="button" @click="removeCustomsItem(n)">Tétel törlése</button>
+          </div>
           <div class="customs-grid">
             <label>Megnevezés *<input :ref="fieldRef(`exportDeclaration.lineItems.${n}.description`)" :class="{ 'field-invalid': hasError(`exportDeclaration.lineItems.${n}.description`) }" v-model="i.description" /><small v-if="errorFor(`exportDeclaration.lineItems.${n}.description`)" class="field-error">{{ errorFor(`exportDeclaration.lineItems.${n}.description`) }}</small></label
             ><label
@@ -855,6 +882,8 @@ onMounted(async () => {
             /><small>Bruttó: az áru vámáru-nyilatkozathoz használt teljes tömege.</small><small v-if="errorFor(`exportDeclaration.lineItems.${n}.grossWeight`)" class="field-error">{{ errorFor(`exportDeclaration.lineItems.${n}.grossWeight`) }}</small></label>
           </div>
         </article>
+        <p :ref="fieldRef('customs.grossWeight')" v-if="errorFor('customs.grossWeight')" class="field-error">{{ errorFor('customs.grossWeight') }}</p>
+        <button class="secondary" type="button" @click="addCustomsItem">+ Új vámtétel hozzáadása</button>
         <section class="upload-zone" @dragover.prevent @drop="drop">
           <h3>Vámdokumentumok</h3>
           <p>

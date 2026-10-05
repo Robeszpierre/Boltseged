@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { api, apiBlob, ApiError } from '../api'
+import { api, apiBlob, ApiError, downloadBlob } from '../api'
 const rows=ref<any[]>([]),accounts=ref<any[]>([]),summary=ref<any[]>([]),selected=ref<string[]>([])
 const accountId=ref(''),from=ref(''),to=ref(''),billingStatus=ref('UNBILLED'),loading=ref(false),error=ref('')
 function query(){const p=new URLSearchParams({size:'25',sort:'createdAt,desc'});if(accountId.value)p.set('accountId',accountId.value);if(from.value)p.set('from',from.value);if(to.value)p.set('to',to.value);if(billingStatus.value)p.set('billingStatus',billingStatus.value);return p}
 async function load(){loading.value=true;error.value='';try{const p=query(),sp=new URLSearchParams(p);sp.delete('size');sp.delete('sort');const [list,total]=await Promise.all([api(`/api/admin/billing?${p}`),api(`/api/admin/billing/summary?${sp}`)]);rows.value=list.content||[];summary.value=total}catch(e){error.value=e instanceof ApiError?e.message:'A számlázási adatok nem tölthetők be.'}finally{loading.value=false}}
 async function loadAccounts(){try{accounts.value=await api('/api/admin/accounts')}catch(e){error.value=e instanceof ApiError?e.message:'Az ügyfelek nem tölthetők be.'}}
-async function exportCsv(){try{const blob=await apiBlob(`/api/admin/billing/csv?${query().toString()}`);const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='billing.csv';a.click();URL.revokeObjectURL(a.href)}catch(e){error.value=e instanceof ApiError?e.message:'A CSV export nem tölthető le.'}}
+async function exportCsv(){try{downloadBlob(await apiBlob(`/api/admin/billing/csv?${query().toString()}`),'billing.csv')}catch(e){error.value=e instanceof ApiError?e.message:'A CSV export nem tölthető le.'}}
 async function invoice(){if(!selected.value.length||!confirm('A kijelölt küldemények számlázottra állítása?'))return;await api('/api/admin/billing/invoice',{method:'POST',body:JSON.stringify(selected.value)});selected.value=[];await load()}
 onMounted(()=>{loadAccounts();load()})
 </script>

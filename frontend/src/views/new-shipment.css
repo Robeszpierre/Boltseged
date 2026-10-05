@@ -62,6 +62,16 @@
   border: 1px solid #dfe8e7;
   border-radius: 10px;
 }
+.customs-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.customs-item-head h3 {
+  margin: 0;
+}
 .quote-list {
   display: grid;
   gap: 12px;
